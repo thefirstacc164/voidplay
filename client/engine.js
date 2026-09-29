@@ -1,463 +1,636 @@
-/**
- * VOIDPLAY — client/engine.js
- * ---------------------------------------------------------------------------
- * HTML5 Canvas engine shared by every game:
- *   * 60 fps render loop (requestAnimationFrame)
- *   * snapshot INTERPOLATION — other players render 100 ms in the past,
- *     smoothly lerped between the server's 20 Hz state snapshots
- *   * CLIENT-SIDE PREDICTION — the local player is simulated instantly by
- *     the game module (predict/reconcile hooks); the server confirms or
- *     corrects
- *   * input handling → 6-bit key bitmask consumed by the 20 Hz input stream
- *   * particles, screen shake, neon HUD, chat toasts
- *
- * Games plug in via window.VP_GAMES[gameId] and implement:
- *   begin(config, myId), render(ctx, view, myPlayerId),
- *   predict(dt, keys), reconcile(serverMe, ackSeq), getPredPos(),
- *   getInstructions()
- * ---------------------------------------------------------------------------
- */
-(function (global) {
+(function (root) {
   'use strict';
 
-  const VP = global.VP || (global.VP = {});
+  var VP = root.VP;
+  var S = VP.S;
+  var W = 800, H = 600;
+  var STEP = 1000 / 60;
+  var BOT_NAMES = ['Nova', 'Pixel', 'Echo', 'Byte', 'Zap', 'Fuse', 'Mint', 'Juno', 'Rex', 'Vex', 'Kilo', 'Onyx', 'Pip', 'Quill', 'Rune', 'Sage', 'Tesla', 'Umbra', 'Volt', 'Wren'];
 
-  const CANVAS_W = 800;
-  const CANVAS_H = 600;
-  const INTERP_DELAY_MS = 100;      // render 100ms behind = smooth at 20Hz
-  const MAX_SNAPS = 40;             // 2s of server history
-  const FONT = '"system-ui", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif';
+  var canvas = null;
+  var ctx = null;
 
-  // Player colors by slot (shared visual language across all games)
-  const PLAYER_COLORS = ['#00fff2', '#ff00e4', '#39ff14', '#ff6600'];
-  VP.colors = PLAYER_COLORS;
-  VP.CANVAS_W = CANVAS_W;
-  VP.CANVAS_H = CANVAS_H;
-
-  // ==========================================================================
-  // Drawing helpers (shared by engine + game modules)
-  // ==========================================================================
-
-  VP.roundRect = function (ctx, x, y, w, h, r) {
-    if (r > w / 2) r = w / 2;
-    if (r > h / 2) r = h / 2;
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  };
-
-  /** White text with a neon glow (the VOIDPLAY house style). */
-  VP.text = function (ctx, str, x, y, o) {
-    o = o || {};
-    ctx.font = '700 ' + (o.size || 16) + 'px ' + FONT;
-    ctx.textAlign = o.align || 'center';
-    ctx.textBaseline = o.baseline || 'middle';
-    ctx.shadowColor = o.glow || o.color || '#00fff2';
-    ctx.shadowBlur = o.blur === undefined ? 10 : o.blur;
-    ctx.fillStyle = o.color || '#ffffff';
-    ctx.fillText(str, x, y);
-    ctx.fillText(str, x, y); // double-pass = punchier glow
-    ctx.shadowBlur = 0;
-  };
-
-  // ==========================================================================
-  // Engine
-  // ==========================================================================
-
-  const engine = {
-    running: false,
-    game: null,          // client game module
+  var E = {
+    mode: null,
+    game: null,
     gameId: null,
-    myId: 0,
-    roomCode: '',
+    st: null,
+    meId: null,
+    twoP: false,
+    running: false,
+    ended: false,
     config: null,
-    roster: {},          // pid → { name, slot }
-    merged: null,        // latest merged game state
-    snaps: [],           // [{ at, pos: { pid: {x,y} } }] for interpolation
-    anim: null,          // { deaths, crack, fall } local-timestamped events
-    keys: 0,
-    particles: [],
-    shakeT: 0, shakeDur: 1, shakeMag: 0,
-    chat: null,
-    dead: false,
-    canvas: null, ctx: null, raf: 0, lastFrame: 0,
+    onEnd: null,
+    keys1: 0,
+    keys2: 0,
+    remote: null,
+    onChat: null,
   };
-  VP.engine = engine;
 
-  // -- lifecycle ----------------------------------------------------------------
+  var scratch = {};
+  var anim = { deaths: {}, tiles: {} };
+  var prevAlive = {};
+  var prevTiles = null;
+  var fxList = [];
+  var shakeMag = 0;
+  var lastFrame = 0;
+  var acc = 0;
+  var raf = 0;
+  var chatFade = [];
 
-  engine.start = function (opts) {
-    // opts: { gameId, myId, roster, config, roomCode }
-    this.gameId = opts.gameId;
-    this.myId = opts.myId;
-    this.config = opts.config || {};
-    this.roomCode = opts.roomCode || '';
-    this.roster = {};
-    for (const r of opts.roster || []) this.roster[String(r.i)] = { name: r.n, slot: r.s };
+  function fxSink(type, data) {
+    if (!E.running) return;
+    if (type === 'burst') {
+      var n = Math.min(40, data.n || 10);
+      for (var i = 0; i < n; i++) {
+        var a = Math.random() * Math.PI * 2;
+        var sp = (data.speed || 200) * (0.3 + Math.random() * 0.7);
+        fxList.push({
+          x: data.x, y: data.y,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 450 + Math.random() * 350, age: 0,
+          color: data.color || '#ffffff',
+          r: 1.5 + Math.random() * 2.5,
+        });
+      }
+    } else if (type === 'death') {
+      fxList.push({ ring: 1, x: data.x, y: data.y, life: 480, age: 0, color: '#ff0055' });
+      for (var j = 0; j < 14; j++) {
+        var a2 = Math.random() * Math.PI * 2;
+        var sp2 = 90 + Math.random() * 160;
+        fxList.push({ x: data.x, y: data.y, vx: Math.cos(a2) * sp2, vy: Math.sin(a2) * sp2, life: 400 + Math.random() * 300, age: 0, color: '#ff0055', r: 1.5 + Math.random() * 2 });
+      }
+    } else if (type === 'shake') {
+      shakeMag = Math.max(shakeMag, data.mag || 3);
+    }
+  }
 
-    this.merged = null;
-    this.snaps = [];
-    this.anim = { deaths: {}, crack: {}, fall: {} };
-    this.particles = [];
-    this.keys = 0;
-    this.chat = null;
-    this.dead = false;
-    this.shakeT = 0;
+  S.fx.set(fxSink);
 
-    this.game = (global.VP_GAMES || {})[this.gameId] || null;
-    if (this.game && this.game.begin) this.game.begin(this.config, this.myId);
+  var loading = {};
 
-    const canvas = document.getElementById('game-canvas');
-    this.canvas = canvas;
-    const dpr = Math.min(global.devicePixelRatio || 1, 2);
-    canvas.width = CANVAS_W * dpr;
-    canvas.height = CANVAS_H * dpr;
-    this.ctx = canvas.getContext('2d');
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    fitCanvas();
-    this.running = true;
-    this.lastFrame = performance.now();
-    cancelAnimationFrame(this.raf);
-    const loop = (now) => {
-      if (!engine.running) return;
-      engine.frame(now);
-      engine.raf = requestAnimationFrame(loop);
+  function loadGame(id, cb) {
+    if (root.VP_GAMES && root.VP_GAMES[id]) return cb(null, root.VP_GAMES[id]);
+    if (loading[id]) {
+      loading[id].push(cb);
+      return;
+    }
+    loading[id] = [cb];
+    var s = document.createElement('script');
+    s.src = '/games/' + id + '.js?v=' + (VP.ASSET_V || 0);
+    s.onload = function () {
+      var list = loading[id];
+      loading[id] = null;
+      var mod = root.VP_GAMES && root.VP_GAMES[id];
+      for (var i = 0; i < list.length; i++) list[i](mod ? null : new Error('no module'), mod);
     };
-    this.raf = requestAnimationFrame(loop);
-
-    VP.net.startInputs(() => engine.keys);
-  };
-
-  engine.stop = function () {
-    this.running = false;
-    cancelAnimationFrame(this.raf);
-    VP.net.stopInputs();
-    this.keys = 0;
-  };
-
-  // -- state ingest ---------------------------------------------------------------
-
-  engine.onState = function (payload) {
-    if (!payload || !payload.d) return;
-    const d = payload.d;
-
-    if (payload.f || !this.merged) {
-      this.merged = { t: d.t || 0, ph: d.ph || 0, tiles: (d.tiles || []).slice(), p: {} };
-      for (const pid in d.p || {}) this.merged.p[pid] = Object.assign({}, d.p[pid]);
-    } else {
-      const m = this.merged;
-      if (d.t !== undefined) m.t = d.t;
-      if (d.ph !== undefined) m.ph = d.ph;
-      if (d.tl) {
-        for (let i = 0; i < d.tl.length; i += 2) {
-          const ti = d.tl[i], ph = d.tl[i + 1];
-          if (m.tiles[ti] === ph) continue;
-          const now = performance.now();
-          if (ph === 1) this.anim.crack[ti] = now;
-          else if (ph === 2) {
-            this.anim.fall[ti] = now;
-            const g = this.config && this.config.grid;
-            if (g) {
-              const gx = ti % g.cols, gy = (ti / g.cols) | 0;
-              this.burst({
-                x: g.offX + (gx + 0.5) * g.cellW, y: g.offY + (gy + 0.5) * g.cellH,
-                color: '#00fff2', n: 6, speed: 60, life: 0.4, size: 2, grav: 160,
-              });
-            }
-          }
-          m.tiles[ti] = ph;
-        }
-      }
-      if (d.p) {
-        for (const pid in d.p) {
-          const patch = d.p[pid];
-          const tgt = m.p[pid] || (m.p[pid] = {});
-          if (patch.al === 0 && tgt.al !== 0) {
-            const now = performance.now();
-            this.anim.deaths[pid] = now;
-            const color = PLAYER_COLORS[((this.roster[pid] || {}).slot || 1) - 1] || '#00fff2';
-            this.burst({ x: tgt.x || 0, y: tgt.y || 0, color, n: 26, speed: 200, life: 0.7, size: 3, grav: 120 });
-            this.addShake(4, 220);
-          }
-          Object.assign(tgt, patch);
-        }
-      }
-    }
-
-    // snapshot for interpolating OTHER players
-    const pos = {};
-    for (const pid in this.merged.p) {
-      const p = this.merged.p[pid];
-      pos[pid] = { x: p.x, y: p.y };
-    }
-    this.snaps.push({ at: performance.now(), pos });
-    if (this.snaps.length > MAX_SNAPS) this.snaps.shift();
-
-    // reconciliation for ME
-    const me = this.merged.p[String(this.myId)];
-    if (me) {
-      if (me.al === 0) this.dead = true;
-      if (this.game && this.game.reconcile) this.game.reconcile(me, payload.a | 0);
-    }
-  };
-
-  // -- per-frame ------------------------------------------------------------------
-
-  engine.frame = function (now) {
-    let dt = (now - this.lastFrame) / 1000;
-    this.lastFrame = now;
-    if (dt > 0.1) dt = 0.1;
-    if (dt < 0) dt = 0;
-
-    if (this.game && this.game.predict && !this.dead) this.game.predict(dt, this.keys);
-
-    const view = this.buildView(now);
-    const ctx = this.ctx;
-
-    ctx.save();
-    if (this.shakeT > 0) {
-      this.shakeT = Math.max(0, this.shakeT - dt * 1000);
-      const k = this.shakeT / this.shakeDur;
-      ctx.translate((Math.random() * 2 - 1) * this.shakeMag * k, (Math.random() * 2 - 1) * this.shakeMag * k);
-    }
-
-    this.drawBackground(ctx);
-
-    if (view && this.game && this.game.render) {
-      this.game.render(ctx, view, this.myId, { now });
-    } else if (view) {
-      VP.text(ctx, 'NO RENDERER FOR THIS GAME', CANVAS_W / 2, CANVAS_H / 2, { size: 20, glow: '#ff00e4' });
-    }
-
-    this.drawParticles(ctx, dt);
-    ctx.restore();
-
-    if (view) this.drawHUD(ctx, view, now);
-  };
-
-  /** Latest state + interpolated positions (others) / predicted position (me). */
-  engine.buildView = function (now) {
-    const m = this.merged;
-    if (!m) return null;
-
-    const rt = now - INTERP_DELAY_MS;
-    let s0 = null, s1 = null;
-    for (let i = this.snaps.length - 1; i >= 0; i--) {
-      if (this.snaps[i].at <= rt) { s0 = this.snaps[i]; s1 = this.snaps[i + 1] || s0; break; }
-    }
-    if (!s0) { s0 = this.snaps[0] || null; s1 = (s0 && this.snaps[1]) || s0; }
-    let alpha = s0 && s1 && s1.at > s0.at ? (rt - s0.at) / (s1.at - s0.at) : 0;
-    if (!isFinite(alpha)) alpha = 0;
-    alpha = Math.max(0, Math.min(1, alpha));
-
-    const players = {};
-    for (const pid in m.p) {
-      const p = m.p[pid];
-      const meta = this.roster[pid] || { name: 'P' + pid, slot: Number(pid) || 1 };
-      let x = p.x, y = p.y;
-      const isMe = pid === String(this.myId);
-      if (isMe && this.game && this.game.getPredPos && !this.dead) {
-        const pp = this.game.getPredPos();
-        if (pp) { x = pp.x; y = pp.y; }
-      } else if (s0 && s0.pos[pid] && s1 && s1.pos[pid]) {
-        x = s0.pos[pid].x + (s1.pos[pid].x - s0.pos[pid].x) * alpha;
-        y = s0.pos[pid].y + (s1.pos[pid].y - s0.pos[pid].y) * alpha;
-      }
-      players[pid] = {
-        x, y, gx: p.gx, gy: p.gy, d: p.d, m: p.m, al: p.al,
-        name: meta.name, slot: meta.slot,
-      };
-    }
-    return { t: m.t, ph: m.ph, tiles: m.tiles, players, anim: this.anim, now };
-  };
-
-  // -- background & HUD -------------------------------------------------------------
-
-  engine.drawBackground = function (ctx) {
-    ctx.fillStyle = '#0a0a0f';
-    ctx.fillRect(-8, -8, CANVAS_W + 16, CANVAS_H + 16);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
-    for (let y = 20; y < CANVAS_H; y += 40) {
-      for (let x = 20; x < CANVAS_W; x += 40) {
-        ctx.fillRect(x - 1, y - 1, 2, 2);
-      }
-    }
-  };
-
-  engine.drawHUD = function (ctx, view, now) {
-    const dur = (this.config.duration || 90) * 1000;
-    const remain = Math.max(0, dur - view.t);
-    const secs = Math.ceil(remain / 1000);
-    const mm = Math.floor(secs / 60);
-    const ss = ('' + (secs % 60)).padStart(2, '0');
-
-    // timer / sudden death (top-center)
-    if (view.ph === 1) {
-      const pulse = 0.5 + 0.5 * Math.sin(now / 130);
-      ctx.globalAlpha = 0.6 + 0.4 * pulse;
-      VP.text(ctx, 'SUDDEN DEATH', CANVAS_W / 2, 26, { size: 22, glow: '#ff6600', color: '#ff6600' });
-      ctx.globalAlpha = 1;
-    } else {
-      VP.text(ctx, mm + ':' + ss, CANVAS_W / 2, 26, { size: 22, glow: '#00fff2' });
-    }
-
-    // player chips: slots 1-2 top-left, 3-4 top-right
-    const pids = Object.keys(view.players).sort();
-    const left = pids.slice(0, 2), right = pids.slice(2);
-    const drawChip = (pid, x, align) => {
-      const p = view.players[pid];
-      const color = PLAYER_COLORS[(p.slot - 1) % 4];
-      ctx.globalAlpha = p.al ? 1 : 0.35;
-      ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 4;
-      VP.roundRect(ctx, x, 14, 12, 12, 3);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.font = '700 12px ' + FONT;
-      ctx.textAlign = align;
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(p.name + (p.al ? '' : '  ✕'), align === 'left' ? x + 18 : x - 18, 21);
-      ctx.globalAlpha = 1;
+    s.onerror = function () {
+      var list = loading[id];
+      loading[id] = null;
+      for (var i = 0; i < list.length; i++) list[i](new Error('load failed'), null);
     };
-    left.forEach((pid, i) => drawChip(pid, 14 + i * 150, 'left'));
-    right.forEach((pid, i) => drawChip(pid, CANVAS_W - 14 - i * 150, 'right'));
+    document.head.appendChild(s);
+  }
 
-    // room code (bottom-left)
-    ctx.font = '700 12px ' + FONT;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.shadowColor = '#00fff2';
-    ctx.shadowBlur = 6;
-    ctx.fillText('ROOM ' + this.roomCode, 14, CANVAS_H - 14);
-    ctx.shadowBlur = 0;
+  function isLoaded(id) {
+    return !!(root.VP_GAMES && root.VP_GAMES[id]);
+  }
 
-    // ping (bottom-right)
-    ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(VP.net.ping() + ' ms', CANVAS_W - 14, CANVAS_H - 14);
-
-    // chat toast
-    if (this.chat && now < this.chat.until) {
-      ctx.globalAlpha = Math.min(1, (this.chat.until - now) / 600);
-      ctx.font = '600 13px ' + FONT;
-      ctx.textAlign = 'left';
-      ctx.fillStyle = this.chat.color || '#fff';
-      ctx.shadowColor = this.chat.color || '#00fff2';
-      ctx.shadowBlur = 8;
-      ctx.fillText(this.chat.text, 14, 60);
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1;
-    }
-
-    // spectator banner
-    if (this.dead) {
-      ctx.globalAlpha = 0.85;
-      VP.text(ctx, 'YOU FELL — SPECTATING', CANVAS_W / 2, CANVAS_H - 40, { size: 15, glow: '#ff00e4', color: '#ff00e4' });
-      ctx.globalAlpha = 1;
-    }
-  };
-
-  // -- particles & shake ---------------------------------------------------------------
-
-  engine.burst = function (o) {
-    const n = o.n || 16;
-    for (let i = 0; i < n; i++) {
-      const a = o.angle !== undefined ? o.angle + (Math.random() - 0.5) * (o.spread || Math.PI * 2)
-                                       : Math.random() * Math.PI * 2;
-      const sp = (o.speed || 160) * (0.4 + Math.random() * 0.8);
-      const life = (o.life || 0.6) * (0.6 + Math.random() * 0.7);
-      this.particles.push({
-        x: o.x, y: o.y,
-        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-        life, max: life,
-        color: o.color || '#00fff2',
-        size: o.size || 3,
-        grav: o.grav || 0,
+  function botRoster(count, startSlot) {
+    var out = [];
+    var pool = BOT_NAMES.slice();
+    for (var i = 0; i < count; i++) {
+      var idx = (Math.random() * pool.length) | 0;
+      var name = pool.splice(idx, 1)[0] || ('BOT ' + (startSlot + i));
+      var shapes = VP.ITEMS.SHAPES;
+      out.push({
+        i: startSlot + i,
+        n: 'BOT ' + name,
+        s: startSlot + i,
+        sh: shapes[(Math.random() * shapes.length) | 0].id,
+        tr: 't0',
+        bot: true,
       });
     }
-    if (this.particles.length > 700) this.particles.splice(0, this.particles.length - 700);
-  };
+    return out;
+  }
 
-  engine.drawParticles = function (ctx, dt) {
-    if (!this.particles.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.life -= dt;
-      if (p.life <= 0) { this.particles.splice(i, 1); continue; }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += p.grav * dt;
-      ctx.globalAlpha = Math.max(0, p.life / p.max);
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  function startLocal(gameId, mode, botCount, me, onEnd) {
+    loadGame(gameId, function (err, game) {
+      if (err || !game) return;
+      var roster = [{ i: 1, n: me.name, s: 1, sh: me.shape || 'sq', tr: me.trail || 't0' }];
+      if (mode === '2p') roster.push({ i: 2, n: 'Player 2', s: 2, sh: me.shape || 'sq', tr: 't0' });
+      roster = roster.concat(botRoster(botCount, roster.length + 1));
+      stop();
+      E.mode = 'local';
+      E.game = game;
+      E.gameId = gameId;
+      E.config = game.CONFIG;
+      E.st = game.init(roster);
+      E.meId = 1;
+      E.twoP = mode === '2p';
+      E.running = true;
+      E.ended = false;
+      E.onEnd = onEnd || null;
+      resetViewCaches();
+      lastFrame = performance.now();
+      acc = 0;
+      raf = requestAnimationFrame(frame);
+    });
+  }
+
+  function startRemote(gameId, config, mePid) {
+    stop();
+    E.mode = 'remote';
+    E.gameId = gameId;
+    E.config = config;
+    E.meId = mePid;
+    E.twoP = false;
+    E.running = true;
+    E.ended = false;
+    E.remote = { view: null, lastT: 0, lastMsgAt: 0, pending: [] };
+    resetViewCaches();
+    lastFrame = performance.now();
+    raf = requestAnimationFrame(frame);
+    loadGame(gameId, function (err, game) {
+      if (err || !game) {
+        E.running = false;
+        return;
+      }
+      E.game = game;
+      if (!E.config) E.config = game.CONFIG;
+      var r = E.remote;
+      if (r && r.pending) {
+        var queued = r.pending;
+        r.pending = null;
+        for (var i = 0; i < queued.length; i++) applyState(queued[i]);
+      }
+    });
+  }
+
+  function resetViewCaches() {
+    scratch = {};
+    anim = { deaths: {}, tiles: {} };
+    prevAlive = {};
+    prevTiles = null;
+    fxList = [];
+    shakeMag = 0;
+    chatFade = [];
+  }
+
+  function stop() {
+    E.running = false;
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    E.mode = null;
+    E.st = null;
+    E.remote = null;
+    E.game = null;
+    E.config = null;
+    E.ended = false;
+  }
+
+  function stepLocal(ms) {
+    var game = E.game;
+    game.onInput(E.st, 1, { k: E.keys1 });
+    if (E.twoP) game.onInput(E.st, 2, { k: E.keys2 });
+    game.bots(E.st);
+    game.tick(E.st, ms);
+    if (!E.ended) {
+      var win = game.checkWin(E.st);
+      if (win) {
+        E.ended = true;
+        if (E.onEnd) E.onEnd(win, true);
+      }
     }
+  }
+
+  var localView = {};
+
+  function buildLocalView() {
+    var st = E.st;
+    localView.t = st.t;
+    localView.ph = st.ph || 0;
+    localView.seed = st.seed;
+    localView.players = st.p;
+    localView.en = st.en || {};
+    localView.tiles = st.tiles || [];
+    localView.s = scratch;
+    localView.anim = anim;
+    localView.w = W;
+    localView.h = H;
+    if (st.ly !== undefined) localView.ly = st.ly;
+    if (st.puck) localView.pk = st.puck;
+    if (st.sc) localView.sc = st.sc;
+    if (st.freeze !== undefined) localView.fz = st.freeze;
+    if (st.rounds) {
+      localView.rounds = st.rounds;
+      localView.rn = st.rn;
+      localView.phase = st.phase;
+      localView.phT = st.phT;
+      localView.tg = st.tg;
+      localView.rw = st.rw;
+      localView.done = st.done;
+    }
+    watchDeaths(st.p);
+    watchTiles(localView.tiles);
+    return localView;
+  }
+
+  function copyExtras(v, d) {
+    var keys = ['ly', 'sc', 'fz', 'rounds', 'rn', 'phase', 'phT', 'tg', 'rw', 'done'];
+    for (var i = 0; i < keys.length; i++) {
+      if (d[keys[i]] !== undefined) v[keys[i]] = d[keys[i]];
+    }
+    if (d.pk !== undefined) v.pk = { x: d.pk[0], y: d.pk[1] };
+  }
+
+  function applyState(msg) {
+    var r = E.remote;
+    if (!r || !E.running) return;
+    var d = msg.d;
+    if (!d) return;
+    if (!E.game) {
+      if (r.pending && r.pending.length < 8) r.pending.push(msg);
+      return;
+    }
+    if (msg.f) {
+      var v = {
+        t: d.t, ph: d.ph || 0, seed: d.seed,
+        players: d.p || {}, en: d.en || {}, tiles: d.tiles || [],
+        s: scratch, anim: anim, w: W, h: H,
+      };
+      copyExtras(v, d);
+      r.view = v;
+      r.lastT = d.t;
+      r.lastMsgAt = performance.now();
+      for (var k in v.players) {
+        var p = v.players[k];
+        p.tx = p.x;
+        p.ty = p.y;
+      }
+      watchDeaths(v.players);
+      watchTiles(v.tiles);
+      return;
+    }
+    var view = r.view;
+    if (!view) return;
+    if (d.t !== undefined) {
+      r.lastT = d.t;
+      r.lastMsgAt = performance.now();
+    }
+    if (d.p) {
+      for (var pid in d.p) {
+        var pd = d.p[pid];
+        if (!view.players[pid]) {
+          view.players[pid] = pd;
+          var np = view.players[pid];
+          np.tx = np.x;
+          np.ty = np.y;
+        } else {
+          var tp = view.players[pid];
+          for (var f in pd) tp[f] = pd[f];
+          if (pd.x !== undefined) tp.tx = pd.x;
+          if (pd.y !== undefined) tp.ty = pd.y;
+        }
+      }
+      watchDeaths(view.players);
+    }
+    if (d.en) {
+      if (d.en.eu) {
+        for (var eid in d.en.eu) {
+          var fields = d.en.eu[eid];
+          if (!view.en[eid]) view.en[eid] = {};
+          var ent = view.en[eid];
+          for (var ef in fields) ent[ef] = fields[ef];
+        }
+      }
+      if (d.en.er) {
+        for (var i = 0; i < d.en.er.length; i++) delete view.en[d.en.er[i]];
+      }
+    }
+    if (d.tiles) {
+      for (var ti = 0; ti < d.tiles.length; ti += 2) {
+        view.tiles[d.tiles[ti]] = d.tiles[ti + 1];
+      }
+      watchTiles(view.tiles);
+    }
+    copyExtras(view, d);
+  }
+
+  function watchDeaths(players) {
+    for (var k in players) {
+      var p = players[k];
+      if (prevAlive[k] && !p.al) anim.deaths[k] = performance.now();
+      prevAlive[k] = p.al;
+    }
+  }
+
+  function watchTiles(tiles) {
+    if (!tiles || !tiles.length) { prevTiles = null; return; }
+    if (!prevTiles) {
+      prevTiles = tiles.slice();
+      return;
+    }
+    for (var i = 0; i < tiles.length; i++) {
+      if (prevTiles[i] !== tiles[i]) anim.tiles[i] = { ph: tiles[i], t: performance.now() };
+    }
+    prevTiles = tiles.slice();
+  }
+
+  function stepRemote(dtMs) {
+    var r = E.remote;
+    if (!r || !r.view) return;
+    r.view.t = r.lastT + (performance.now() - r.lastMsgAt);
+    var d = dtMs / 1000;
+    for (var k in r.view.players) {
+      var p = r.view.players[k];
+      if (typeof p.tx !== 'number') continue;
+      var dx = p.tx - p.x;
+      var dy = p.ty - p.y;
+      if (Math.hypot(dx, dy) > 90) {
+        p.x = p.tx;
+        p.y = p.ty;
+      } else {
+        p.x += dx * 0.15 + (p.vx || 0) * d;
+        p.y += dy * 0.15 + (p.vy || 0) * d;
+      }
+    }
+  }
+
+  function frame(now) {
+    if (!E.running) return;
+    raf = requestAnimationFrame(frame);
+    var dt = now - lastFrame;
+    lastFrame = now;
+    if (dt > 200) dt = 200;
+    if (E.mode === 'local') {
+      acc += dt;
+      var guard = 0;
+      while (acc >= STEP && guard < 6) {
+        stepLocal(STEP);
+        acc -= STEP;
+        guard++;
+      }
+      if (guard >= 6) acc = 0;
+    } else {
+      stepRemote(dt);
+    }
+    renderFrame(now);
+  }
+
+  function renderFrame(now) {
+    var game = E.game;
+    if (!game) return;
+    var view = E.mode === 'local' ? buildLocalView() : (E.remote && E.remote.view);
+    if (!view) return;
+    view.now = now;
+    ctx.save();
+    if (shakeMag > 0.2) {
+      ctx.translate((Math.random() - 0.5) * shakeMag * 2, (Math.random() - 0.5) * shakeMag * 2);
+      shakeMag *= 0.88;
+    } else {
+      shakeMag = 0;
+    }
+    ctx.fillStyle = '#07070f';
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    try {
+      game.render(ctx, view, E.meId);
+    } catch (err) {
+      ctx.restore();
+      return;
+    }
+    drawTrails(view, now);
+    drawFx(dt2(now));
     ctx.restore();
+    drawHud(view, now);
+  }
+
+  function drawTrails(view, now) {
+    if (!scratch.trails) scratch.trails = {};
+    var hist = scratch.trails;
+    var pids = Object.keys(view.players || {});
+    for (var i = 0; i < pids.length; i++) {
+      var p = view.players[pids[i]];
+      if (!p || !p.al || !p.tr || p.tr === 't0') continue;
+      var h = hist[pids[i]] || (hist[pids[i]] = []);
+      var last = h[h.length - 1];
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 3) {
+        h.push({ x: p.x, y: p.y, t: now });
+        if (h.length > 26) h.shift();
+      }
+      var color = S.COLORS[((p.slot || p.s || 1) - 1) % 4];
+      if (p.tr === 't1') {
+        for (var j = 0; j < h.length; j++) {
+          var a = 1 - (now - h[j].t) / 500;
+          if (a <= 0) continue;
+          ctx.fillStyle = color;
+          ctx.globalAlpha = a * 0.5;
+          var sz = 1 + a * 2.5;
+          ctx.fillRect(h[j].x - sz / 2 + (j % 2 ? 2 : -2), h[j].y - sz / 2, sz, sz);
+        }
+      } else if (p.tr === 't2') {
+        if (h.length > 1) {
+          ctx.strokeStyle = color;
+          ctx.lineCap = 'round';
+          for (var k = 1; k < h.length; k++) {
+            var a2 = 1 - (now - h[k].t) / 600;
+            if (a2 <= 0) continue;
+            ctx.globalAlpha = a2 * 0.45;
+            ctx.lineWidth = 7 * a2;
+            ctx.beginPath();
+            ctx.moveTo(h[k - 1].x, h[k - 1].y);
+            ctx.lineTo(h[k].x, h[k].y);
+            ctx.stroke();
+          }
+        }
+      } else if (p.tr === 't4') {
+        for (var m = 0; m < h.length; m += 2) {
+          var age = (now - h[m].t) / 700;
+          if (age >= 1) continue;
+          ctx.globalAlpha = (1 - age) * 0.35;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(h[m].x, h[m].y - age * 14, 2 + age * 6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (p.tr === 't3') {
+        for (var q = 0; q < h.length; q++) {
+          var a3 = 1 - (now - h[q].t) / 550;
+          if (a3 <= 0) continue;
+          var hue = ((now / 12) + q * 14) % 360;
+          ctx.globalAlpha = a3 * 0.6;
+          ctx.fillStyle = 'hsl(' + hue + ',100%,60%)';
+          var sz2 = 2 + a3 * 3;
+          ctx.fillRect(h[q].x - sz2 / 2, h[q].y - sz2 / 2, sz2, sz2);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  var lastFxT = 0;
+  function dt2(now) {
+    var d = now - lastFxT;
+    lastFxT = now;
+    return Math.min(100, d) / 1000;
+  }
+
+  function drawFx(d) {
+    for (var i = fxList.length - 1; i >= 0; i--) {
+      var f = fxList[i];
+      f.age += d * 1000;
+      if (f.age >= f.life) { fxList.splice(i, 1); continue; }
+      var k = 1 - f.age / f.life;
+      if (f.ring) {
+        ctx.strokeStyle = f.color;
+        ctx.globalAlpha = k * 0.8;
+        ctx.lineWidth = 2 + k * 2;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, (1 - k) * 46 + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        f.x += f.vx * d;
+        f.y += f.vy * d;
+        f.vy += 140 * d;
+        ctx.fillStyle = f.color;
+        ctx.globalAlpha = k;
+        ctx.fillRect(f.x - f.r / 2, f.y - f.r / 2, f.r, f.r);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function fmtTime(ms) {
+    if (ms < 0) ms = 0;
+    var s = Math.ceil(ms / 1000);
+    var mm = (s / 60) | 0;
+    var ss = s % 60;
+    return mm + ':' + (ss < 10 ? '0' : '') + ss;
+  }
+
+  function drawHud(view, now) {
+    if (!E.config) return;
+    var left = E.config.duration * 1000 - view.t;
+    if (E.config.duration) {
+      var urgent = left < 10000;
+      S.text(ctx, fmtTime(left), W / 2, 26, { size: 22, glow: urgent ? '#ff4400' : '#00fff2', color: urgent ? '#ff4400' : null });
+    }
+    var pids = Object.keys(view.players);
+    pids.sort(function (a, b) { return (view.players[a].s || 0) - (view.players[b].s || 0); });
+    var x = 14;
+    for (var i = 0; i < pids.length; i++) {
+      var p = view.players[pids[i]];
+      var color = S.COLORS[((p.slot || p.s || 1) - 1) % 4];
+      var label = (p.name || '') + (p.sc !== undefined ? ' ' + p.sc : '');
+      ctx.fillStyle = 'rgba(7,7,15,0.6)';
+      var w = ctx.measureText(label).width;
+      S.rrect(ctx, x - 4, 10, 12, 12, 3);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.fillRect(x, 12, 10, 10);
+      S.text(ctx, label, x + 16, 21, { size: 11, glow: color, blur: 4 });
+      x += 16 + Math.max(60, label.length * 7);
+    }
+    var me = view.players[String(E.meId)];
+    if (me && !me.al) {
+      S.text(ctx, 'YOU DIED - SPECTATING', W / 2, H - 26, { size: 15, glow: '#ff00e4', color: '#ff00e4' });
+    }
+    if (E.mode === 'remote') {
+      S.text(ctx, VP.net.ping() + ' ms', W - 14, H - 14, { size: 10, align: 'right', glow: '#ffffff', blur: 0 });
+    }
+    if (E.mode === 'local' && E.twoP) {
+      S.text(ctx, 'P1 WASD + SPACE      P2 ARROWS + ENTER', W / 2, H - 14, { size: 11, glow: '#ffffff', blur: 0 });
+    }
+    var cut = now - 9000;
+    var lines = 0;
+    for (var c = chatFade.length - 1; c >= 0; c--) {
+      var m = chatFade[c];
+      if (m.t < cut) { chatFade.splice(c, 1); continue; }
+      lines++;
+      var a = Math.min(1, (m.t + 9000 - now) / 2500);
+      ctx.globalAlpha = a;
+      S.text(ctx, m.text, 14, H - 60 - lines * 18, { size: 12, glow: '#ffffff', blur: 0 });
+      ctx.globalAlpha = 1;
+      if (lines >= 5) break;
+    }
+  }
+
+  function pushChat(text) {
+    chatFade.push({ t: performance.now(), text: String(text).slice(0, 120) });
+    if (chatFade.length > 12) chatFade.shift();
+  }
+
+  var KEYMAP1 = {
+    KeyW: 1, KeyS: 2, KeyA: 4, KeyD: 8,
+    Space: 16, ShiftLeft: 32,
+  };
+  var KEYMAP2 = {
+    ArrowUp: 1, ArrowDown: 2, ArrowLeft: 4, ArrowRight: 8,
+    Enter: 16, ShiftRight: 32,
   };
 
-  engine.addShake = function (mag, ms) {
-    this.shakeMag = mag;
-    this.shakeDur = ms;
-    this.shakeT = ms;
-  };
-
-  engine.chatToast = function (name, text, color) {
-    this.chat = { text: name + ': ' + text, color, until: performance.now() + 4000 };
-  };
-
-  // -- input ------------------------------------------------------------------------------
-
-  const KEYMAP = {
-    ArrowUp: 1, KeyW: 1,
-    ArrowDown: 2, KeyS: 2,
-    ArrowLeft: 4, KeyA: 4,
-    ArrowRight: 8, KeyD: 8,
-    Space: 16,
-    ShiftLeft: 32, ShiftRight: 32,
-  };
-
-  function isEditable(el) {
+  function editable(el) {
     return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
   }
 
-  function bindInput() {
-    document.addEventListener('keydown', (e) => {
-      if (!engine.running || isEditable(e.target) || e.repeat) return;
-      const bit = KEYMAP[e.code];
-      if (!bit) return;
-      e.preventDefault();
-      engine.keys |= bit;
-    });
-    document.addEventListener('keyup', (e) => {
-      if (!engine.running) return;
-      const bit = KEYMAP[e.code];
-      if (!bit) return;
-      e.preventDefault();
-      engine.keys &= ~bit;
-    });
-    global.addEventListener('blur', () => { engine.keys = 0; });
-  }
-  bindInput();
+  var keysBound = false;
 
-  // -- canvas scaling ------------------------------------------------------------------------
+  function bindKeys() {
+    if (keysBound) return;
+    keysBound = true;
+    document.addEventListener('keydown', function (ev) {
+      if (editable(ev.target)) return;
+      var b1 = KEYMAP1[ev.code];
+      var b2 = KEYMAP2[ev.code];
+      if (b1) { E.keys1 |= b1; ev.preventDefault(); }
+      if (b2) { E.keys2 |= b2; ev.preventDefault(); }
+    });
+    document.addEventListener('keyup', function (ev) {
+      var b1 = KEYMAP1[ev.code];
+      var b2 = KEYMAP2[ev.code];
+      if (b1) E.keys1 &= ~b1;
+      if (b2) E.keys2 &= ~b2;
+    });
+    window.addEventListener('blur', function () {
+      E.keys1 = 0;
+      E.keys2 = 0;
+    });
+  }
+
+  function netKeys() {
+    return E.keys1 | E.keys2;
+  }
+
+  function attach(canvasEl) {
+    canvas = canvasEl;
+    canvas.width = W;
+    canvas.height = H;
+    ctx = canvas.getContext('2d');
+    bindKeys();
+  }
 
   function fitCanvas() {
-    const wrap = document.getElementById('game-wrap');
-    const canvas = engine.canvas || document.getElementById('game-canvas');
-    if (!wrap || !canvas) return;
-    const s = Math.min(wrap.clientWidth / CANVAS_W, wrap.clientHeight / CANVAS_H) || 1;
-    canvas.style.width = Math.floor(CANVAS_W * s) + 'px';
-    canvas.style.height = Math.floor(CANVAS_H * s) + 'px';
+    if (!canvas) return;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var scale = Math.min(vw / W, vh / H);
+    canvas.style.width = Math.floor(W * scale) + 'px';
+    canvas.style.height = Math.floor(H * scale) + 'px';
   }
-  global.addEventListener('resize', fitCanvas);
-  document.addEventListener('DOMContentLoaded', fitCanvas);
-})(window);
+
+  VP.engine = {
+    E: E,
+    attach: attach,
+    fitCanvas: fitCanvas,
+    loadGame: loadGame,
+    isLoaded: isLoaded,
+    startLocal: startLocal,
+    startRemote: startRemote,
+    applyState: applyState,
+    stop: stop,
+    netKeys: netKeys,
+    pushChat: pushChat,
+  };
+})(typeof self !== 'undefined' ? self : globalThis);

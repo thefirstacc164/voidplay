@@ -1,6 +1,6 @@
 {
   "name": "voidplay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "VOIDPLAY — multiplayer browser microgames. The firewall can't stop the fun.",
   "main": "server/index.js",
   "scripts": {

@@ -4,155 +4,203 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VOIDPLAY — the firewall can't stop the fun</title>
-  <meta name="description" content="VOIDPLAY — multiplayer browser microgames. No installs, no downloads, just a room code.">
+  <meta name="description" content="VOIDPLAY — 20 multiplayer browser microgames. No installs, no downloads, just a room code.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0f'/%3E%3Cpath d='M8 8l8 16 8-16' stroke='%2300fff2' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/client/style.css">
 </head>
 <body>
 
   <div id="app">
 
-    <!-- ═══════════ SCREEN 1 — TITLE ═══════════ -->
     <section id="screen-title" class="screen active">
       <div class="title-stack">
         <div class="logo">VOID<span class="logo-accent">PLAY</span></div>
         <div class="tagline">THE FIREWALL CAN'T STOP THE FUN</div>
-        <div class="title-form">
-          <input id="username" maxlength="16" placeholder="ENTER USERNAME" autocomplete="off" spellcheck="false" autofocus>
-          <button id="btn-continue" class="btn primary big">CONTINUE</button>
+        <div class="title-menu">
+          <button id="btn-play" class="btn primary big">PLAY</button>
+          <div class="join-box">
+            <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
+            <button id="btn-join" class="btn ghost">JOIN ROOM</button>
+            <span class="join-sep">or</span>
+            <button id="btn-create" class="btn ghost">CREATE ROOM</button>
+          </div>
         </div>
-        <div class="title-foot">
-          multiplayer microgames · nothing to install · just share a room code
-        </div>
+        <div class="title-foot">Made with love by Step</div>
       </div>
     </section>
 
-    <!-- ═══════════ SCREEN 2 — MAIN MENU ═══════════ -->
-    <section id="screen-menu" class="screen">
-      <header class="menu-header">
-        <div class="logo small">VOID<span class="logo-accent">PLAY</span></div>
-        <div class="menu-me">
-          <span id="menu-username" class="me-name"></span>
-          <button id="btn-rename" class="btn ghost tiny" title="Change username">EDIT</button>
-        </div>
+    <section id="screen-library" class="screen">
+      <header class="sub-head">
+        <button id="btn-lib-back" class="btn ghost tiny">← BACK</button>
+        <div class="sub-title">GAME LIBRARY</div>
+        <div id="lib-progress" class="lib-progress"></div>
       </header>
+      <div id="library-grid" class="library-grid"></div>
+    </section>
 
-      <div class="menu-body">
-        <div class="menu-cards">
-          <button id="btn-create" class="menu-card">
-            <div class="mc-icon">⚡</div>
-            <div class="mc-title">CREATE ROOM</div>
-            <div class="mc-sub">Host a match, pick the game, share the code</div>
-          </button>
-          <div class="menu-card static">
-            <div class="mc-icon">🎯</div>
-            <div class="mc-title">JOIN ROOM</div>
-            <div class="join-row">
-              <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
-              <button id="btn-join" class="btn primary">JOIN</button>
+    <section id="screen-room" class="screen">
+      <header class="sub-head">
+        <button id="btn-room-leave" class="btn ghost tiny">← LEAVE</button>
+        <div class="sub-title">ROOM <span id="room-code" class="room-code"></span></div>
+        <div id="room-phase" class="room-phase"></div>
+      </header>
+      <div class="room-body">
+        <div class="room-main">
+          <div id="room-players" class="room-players"></div>
+          <div class="room-actions">
+            <button id="btn-bot-add" class="btn ghost">+ BOT</button>
+            <button id="btn-bot-del" class="btn ghost">- BOT</button>
+            <button id="btn-trade" class="btn ghost">TRADE</button>
+          </div>
+          <button id="btn-start" class="btn primary big">START</button>
+          <div id="room-hint" class="room-hint"></div>
+        </div>
+        <div class="room-side">
+          <div id="room-game-name" class="room-game"></div>
+          <div class="room-chat">
+            <div id="chat-log" class="chat-log"></div>
+            <div class="chat-row">
+              <input id="chat-input" maxlength="200" placeholder="say something…" autocomplete="off">
             </div>
           </div>
         </div>
-
-        <div class="friends-panel">
-          <div class="panel-head">
-            <span>FRIENDS</span>
-            <span class="panel-hint">online status · click a friend's room to jump in</span>
-          </div>
-          <div class="friend-add">
-            <input id="friend-name" maxlength="16" placeholder="add friend by username" autocomplete="off" spellcheck="false">
-            <button id="btn-add-friend" class="btn">ADD</button>
-          </div>
-          <ul id="friend-list" class="friend-list"></ul>
-          <div class="panel-note">friends are stored on this device — accounts arrive in phase 3</div>
-        </div>
       </div>
     </section>
 
-    <!-- ═══════════ SCREEN 3 — ROOM LOBBY ═══════════ -->
-    <section id="screen-lobby" class="screen">
-      <header class="lobby-head">
-        <div class="room-code-wrap">
-          <span class="rc-label">ROOM CODE</span>
-          <span id="lobby-code" class="room-code"></span>
-          <button id="btn-copy-code" class="btn ghost tiny" title="Copy room code">COPY</button>
-        </div>
-        <button id="btn-leave" class="btn danger">LEAVE</button>
-      </header>
-
-      <div class="lobby-body">
-        <aside class="lobby-left">
-          <div class="panel-head"><span>PLAYERS</span><span id="lobby-count" class="panel-hint"></span></div>
-          <ul id="lobby-players" class="player-list"></ul>
-          <div class="lobby-actions">
-            <button id="btn-start" class="btn primary big" disabled>START</button>
-            <div id="start-hint" class="start-hint"></div>
-          </div>
-        </aside>
-
-        <div class="lobby-right">
-          <div class="panel-head"><span>PICK A GAME</span><span class="panel-hint">host selects · everyone sees</span></div>
-          <div id="game-grid" class="game-grid"></div>
-          <div id="game-detail" class="game-detail"></div>
-        </div>
-      </div>
-
-      <footer class="chat-bar">
-        <div id="chat-log" class="chat-log"></div>
-        <input id="chat-input" maxlength="200" placeholder="say something…" autocomplete="off">
-        <button id="btn-chat-send" class="btn">SEND</button>
-      </footer>
-    </section>
-
-    <!-- ═══════════ SCREEN 4 — IN-GAME ═══════════ -->
     <section id="screen-game" class="screen">
-      <div id="game-wrap"><canvas id="game-canvas" width="800" height="600"></canvas></div>
-      <div id="leave-overlay" class="overlay hidden">
-        <div class="overlay-card">
-          <div class="overlay-title">LEAVE THE MATCH?</div>
-          <div class="overlay-sub">your character will be eliminated</div>
-          <div class="overlay-actions">
-            <button id="btn-stay" class="btn">STAY</button>
-            <button id="btn-leave-match" class="btn danger">LEAVE</button>
-          </div>
-        </div>
+      <canvas id="game-canvas"></canvas>
+      <div id="game-topbar" class="game-topbar">
+        <button id="btn-game-exit" class="btn ghost tiny">EXIT</button>
+        <div id="game-name-label" class="game-name-label"></div>
+        <div id="conn-status" class="conn-status"></div>
       </div>
-    </section>
-
-    <!-- ═══════════ SCREEN 5 — RESULTS ═══════════ -->
-    <section id="screen-results" class="screen">
-      <canvas id="results-canvas" width="800" height="600"></canvas>
-      <div class="results-stack">
+      <div id="results" class="results hidden">
         <div id="results-title" class="results-title"></div>
-        <div id="results-sub" class="results-sub"></div>
-        <ol id="results-board" class="results-board"></ol>
+        <div id="results-list" class="results-list"></div>
+        <div id="results-reward" class="results-reward"></div>
         <div class="results-actions">
-          <button id="btn-again" class="btn primary big">PLAY AGAIN</button>
-          <button id="btn-back-lobby" class="btn">BACK TO LOBBY</button>
-          <button id="btn-change-game" class="btn">CHANGE GAME</button>
+          <button id="btn-again" class="btn primary">PLAY AGAIN</button>
+          <button id="btn-results-lobby" class="btn ghost">ROOM</button>
+          <button id="btn-results-menu" class="btn ghost">MENU</button>
         </div>
-        <div id="results-wait" class="results-wait hidden">waiting for the host to decide…</div>
       </div>
     </section>
 
-  </div>
+    <div id="friend-dock" class="friend-dock">
+      <div class="dock-head">FRIENDS</div>
+      <div id="friend-list" class="friend-list"></div>
+    </div>
 
-  <!-- error / connection modal -->
-  <div id="modal" class="overlay hidden">
-    <div class="overlay-card">
-      <div id="modal-title" class="overlay-title"></div>
-      <div id="modal-sub" class="overlay-sub"></div>
-      <div class="overlay-actions">
-        <button id="modal-btn" class="btn primary">OK</button>
+    <button id="btn-account" class="btn ghost account-btn">ACCOUNT</button>
+    <div id="coin-chip" class="coin-chip"><span id="coin-count">0</span> ¢</div>
+    <div id="me-chip" class="me-chip"></div>
+
+    <div id="toasts" class="toasts"></div>
+
+    <div id="modal-account" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-account">×</button>
+        <div id="account-auth" class="account-auth">
+          <div class="modal-title">ACCOUNT</div>
+          <div class="auth-tabs">
+            <button id="tab-login" class="auth-tab active">LOG IN</button>
+            <button id="tab-signup" class="auth-tab">SIGN UP</button>
+          </div>
+          <input id="auth-name" maxlength="16" placeholder="name" autocomplete="off" spellcheck="false">
+          <input id="auth-pass" type="password" maxlength="72" placeholder="password" autocomplete="off">
+          <button id="btn-auth-go" class="btn primary wide">LOG IN</button>
+          <div id="auth-msg" class="auth-msg"></div>
+          <div class="auth-note">Accounts are optional. Guests keep their coins on this device and can merge them when they log in.</div>
+        </div>
+        <div id="account-panel" class="account-panel hidden">
+          <div class="modal-title" id="account-title">ACCOUNT</div>
+          <div id="account-stats" class="account-stats"></div>
+          <div class="shop-tabs">
+            <button class="shop-tab active" data-shop="shape">SHAPES</button>
+            <button class="shop-tab" data-shop="trail">TRAILS</button>
+          </div>
+          <div id="shop-grid" class="shop-grid"></div>
+          <button id="btn-logout" class="btn ghost wide">LOG OUT</button>
+        </div>
       </div>
     </div>
+
+    <div id="modal-loadmode" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">GAME LIBRARY</div>
+        <p class="loadmode-text">All 20 games together are about <b id="loadmode-size">60 KB</b> compressed — lighter than one photo.</p>
+        <button id="btn-load-all" class="btn primary wide">LOAD ALL NOW</button>
+        <button id="btn-load-manual" class="btn ghost wide">LOAD ONE BY ONE</button>
+        <div class="auth-note">Your choice is remembered on this device.</div>
+      </div>
+    </div>
+
+    <div id="modal-start" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-start">×</button>
+        <div id="start-head" class="start-head"></div>
+        <div id="start-desc" class="start-desc"></div>
+        <div id="start-instr" class="start-instr"></div>
+        <div class="start-buttons">
+          <button id="btn-mode-solo" class="btn primary">SOLO<span class="btn-sub">vs bots</span></button>
+          <button id="btn-mode-2p" class="btn primary">TWO PLAYER<span class="btn-sub">shared keyboard</span></button>
+          <button id="btn-mode-online" class="btn primary">MULTIPLAYER<span class="btn-sub">online room</span></button>
+        </div>
+        <div id="bot-picker" class="bot-picker">
+          <span>BOTS</span>
+          <button class="bot-opt" data-n="1">1</button>
+          <button class="bot-opt" data-n="2">2</button>
+          <button class="bot-opt" data-n="3">3</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-trade" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-trade">×</button>
+        <div class="modal-title">TRADE</div>
+        <div class="trade-row">
+          <label>Player</label>
+          <select id="trade-target"></select>
+        </div>
+        <div class="trade-cols">
+          <div class="trade-col">
+            <div class="trade-col-title">YOU GIVE</div>
+            <div id="trade-give" class="trade-items"></div>
+          </div>
+          <div class="trade-col">
+            <div class="trade-col-title">YOU GET</div>
+            <div id="trade-want" class="trade-items"></div>
+          </div>
+        </div>
+        <button id="btn-trade-send" class="btn primary wide">SEND OFFER</button>
+      </div>
+    </div>
+
+    <div id="modal-offer" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">TRADE OFFER</div>
+        <div id="offer-body" class="offer-body"></div>
+        <div class="results-actions">
+          <button id="btn-offer-accept" class="btn primary">ACCEPT</button>
+          <button id="btn-offer-decline" class="btn ghost">DECLINE</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-invite" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">INVITE</div>
+        <div id="invite-list" class="invite-list"></div>
+      </div>
+    </div>
+
   </div>
 
-  <div id="toast-dock"></div>
-
-  <script src="/network.js"></script>
-  <script src="/engine.js"></script>
-  <script src="/games/tileCollapse.js"></script>
-  <script src="/lobby.js"></script>
+  <script src="/shared/core.js"></script>
+  <script src="/shared/items.js"></script>
+  <script src="/client/network.js"></script>
+  <script src="/client/engine.js"></script>
+  <script src="/client/lobby.js"></script>
 </body>
 </html>

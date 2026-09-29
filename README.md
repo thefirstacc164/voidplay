@@ -1,123 +1,100 @@
 # VOIDPLAY
 
-**Multiplayer browser microgames. The firewall can't stop the fun.**
+**20 multiplayer browser microgames. The firewall can't stop the fun.**
 
-No installs, no downloads, no accounts — share a 4-letter room code and play.
-Built for restrictive networks: one tiny Node process serving static files and
-WebSockets on a single port, vanilla JS + Canvas on the client, zero CDNs,
-zero bundlers.
+No installs, no downloads, no sign-up wall — press PLAY, share a 4-letter room
+code, and go. Built for restrictive networks: one tiny Node process serving
+gzipped static files and WebSockets on a single port, vanilla JS + Canvas on
+the client, zero CDNs, zero bundlers.
 
-**Phase 1 (this build):** authoritative WebSocket server, room system, full
-lobby UI, friend presence, and the first game — **Tile Collapse**.
+Made with love by Step.
 
 ---
 
-## Quick start
+## The games
+
+| | | | |
+|---|---|---|---|
+| 🧱 Tile Collapse | 🥊 Bumper Knock | 🧟 Infected | 💣 Bomb Tag |
+| 🏃 Turbo Tag | 👑 King of the Hill | 💪 Juggernaut | 🎨 Color Raid |
+| 🐍 Snake Pit | 🖌️ Pixel Paint | 🌀 Gravity Well | 🛸 Orbit Dodge |
+| ⚡ Laser Maze | 🧗 Sky Climb | 🌋 Lava Floor | 🏎️ Neon Drift |
+| 🌀 Maze Racer | 🏒 Hover Hockey | ☄️ Asteroid Storm | ⚡ Reaction Royale |
+
+Every game runs three ways:
+
+- **SOLO** — you plus 1–3 bots, simulated entirely in your browser
+- **TWO PLAYER** — two humans on one keyboard (WASD + Space vs Arrows + Enter)
+- **MULTIPLAYER** — authoritative server rooms with a shareable code
+
+Solo and two-player modes never touch the server: the game module runs in a
+local fixed-timestep loop, so a potato on school wifi can still play.
+
+## Accounts, coins and the vault
+
+Playing as a guest needs nothing — you get a random name and your coins are
+kept on your device. The optional ACCOUNT button unlocks:
+
+- **coins and a shop** — shapes and trails, earned by playing (win 60 / 2nd 30 / 3rd 15 / 4th 10, +10 per match)
+- **trading** — swap items with anyone in your room
+- **friends** — a live dock with online status, room codes, invites and quick play
+- **stats** — plays and wins
+
+Guest coins merge into your account when you log in (capped at 400 per merge).
+
+### Where accounts live
+
+Accounts are stored in an **encrypted blob inside this repository** — no
+database service. The vault file (`db.bin` on the `vault` branch) is
+AES-256-GCM encrypted with `VAULT_KEY`; passwords are scrypt-hashed *inside*
+the encrypted blob, so nothing readable ever leaves the server. The server
+pushes the vault through the GitHub Contents API (debounced) and pulls +
+merges every 90 seconds.
+
+Because the repo is public, the key and token never enter git — they are env
+vars:
+
+| Variable | What it is |
+|---|---|
+| `VAULT_KEY` | any long random string — the AES key material |
+| `GH_REPO` | `owner/repo` of this repository |
+| `GH_TOKEN` | a fine-grained token with read/write on Contents |
+| `SESSION_SECRET` | any long random string — signs session tokens |
+
+Without them the server falls back to a local `data/vault.json` (gitignored),
+so development needs zero configuration.
+
+## Bandwidth-friendly by design
+
+- every asset is pre-gzipped in memory; all 20 games together are ~55 KB compressed
+- games load Steam-style: the library asks *load all now* or *one by one*, and remembers your choice
+- game files are versioned (`?v=`), `immutable` + ETag — cached forever, revalidated for nothing
+- gameplay runs at 20 Hz with delta-compressed state (typically a few hundred bytes per tick)
+- input is a 2-byte MessagePack array
+
+## Running it
 
 ```bash
 npm install
-npm start          # → http://localhost:10000
+npm start            # → http://localhost:10000
 ```
 
-Open the URL in two browser tabs (or two machines), enter a username in each,
-create a room in one tab, join with the code in the other, and START.
-
-Run the integration test (spins up the server, simulates a full 2-player
-match, checks the wire protocol and bandwidth):
+Tests:
 
 ```bash
-npm test
+node test/smoke.js   # full server + protocol + accounts integration suite (needs the server running)
+node test/soak.js    # simulates every game with 4 bots until it ends — checks it always terminates
 ```
 
-## Playing
+Deploy to Render with **New + Blueprint** on this repo (see `render.yaml`).
+Set the four env vars above in the dashboard to enable the GitHub vault.
 
-- **Create a room** → you're the host → pick a game → **START**
-- Others **join with the 4-letter code** (consonant-vowel pattern: `BOKU`, `LAKE`, `FUME`…)
-- Up to 4 players · room dies 30s after everyone leaves
-- **Move:** WASD / Arrow keys · **ACTION1:** Space · **ACTION2:** Shift · **ESC:** leave overlay
-- The game grid shows 20 planned games; Tile Collapse is live, the rest unlock in later phases.
-
-### Tile Collapse 🧱
-Hop between tiles on a 12×10 grid. A tile cracks 0.8s after you step off it
-and falls 0.5s later. Fall with it and you're out. Last one standing wins.
-After 45s, sudden death: every remaining tile starts decaying, so nobody can
-camp forever.
-
-## Deploying to Render.com
-
-The repo ships a [`render.yaml`](render.yaml) (Blueprint deploys), or create a
-**Web Service** manually:
-
-| Field | Value |
-|---|---|
-| Language | Node |
-| Branch | `main` |
-| Root Directory | *(leave blank)* |
-| Build Command | `npm install` |
-| Start Command | `node server/index.js` |
-| Instance Type | Free |
-| Environment Variables | none needed |
-
-Render injects `PORT` automatically — the server listens on
-`process.env.PORT || 10000`, bound to `0.0.0.0`, and serves HTTP + WebSocket
-upgrades on that same port.
-
-**Free-tier notes:** the instance spins down after idle periods (first hit
-after that takes ~30-60s to cold-start, and all in-memory rooms are lost —
-there is no database by design). Active WebSocket traffic keeps it awake.
-
-## Architecture
+## Layout
 
 ```
-server/
-  index.js        HTTP static server + WS upgrade on one port, message routing
-  rooms.js        Room create/join/codes/lifecycle, 20Hz game loops, presence
-  network.js      Binary framing + MessagePack (msgpackr)
-  games/
-    index.js      Game registry
-    tileCollapse.js  Server simulation (init/onInput/tick/getState/checkWin)
-client/
-  index.html      Single-page app: title → menu → room → game → results
-  lobby.js        Screens, room UI, game grid, friends, chat, results
-  engine.js       60fps Canvas loop, interpolation, prediction, particles, HUD
-  network.js      WebSocket client + compact MessagePack codec (no deps)
-  games/
-    tileCollapse.js  Renderer + client-side prediction
-  style.css       Neon minimalist dark theme
-render.yaml       Render.com blueprint
+server/       index, rooms, accounts, vault, games loader, wire protocol
+games/        20 game modules (shared by server + browser)
+shared/       core helpers (physics, deltas, canvas kit) + item catalog
+client/       vanilla JS: menu, library, lobby, engine, network
+test/         smoke (integration) + soak (game termination)
 ```
-
-### Networking
-
-- **Server is authoritative** — 20 Hz (50 ms) fixed tick per room.
-- **Binary frames only**: `[msgType: 1 byte][MessagePack payload]`
-  - `0x01` input (c→s): `[keysBitmask, seq]` — ~4 bytes, 20×/sec
-  - `0x02` state (s→c): `{ ack, full?, delta }` — delta-compressed, ~1-4 KB/s
-  - `0x03` room events (join/leave/pick/start/end/again/lobby)
-  - `0x04` social (chat, hello, friend presence)
-- **Input bitmask:** UP=1 DOWN=2 LEFT=4 RIGHT=8 ACTION1=16 ACTION2=32
-- **Delta compression:** each broadcast only contains properties that changed
-  since the last one (tiles go out as flat `index,phase` pairs).
-- **Client renders at 60fps**, interpolating other players 100ms in the past.
-- **Client-side prediction:** your own hops apply instantly; the server
-  confirms or corrects (input seqs are tagged so late server states are
-  recognised as "catching up", not desync).
-- **Bandwidth budget:** measured ~1-2 KB/s per player during a 2-player match
-  (target: < 5 KB/s).
-
-## Roadmap
-
-1. ✅ **Phase 1** — server, rooms, lobby, Tile Collapse *(you are here)*
-2. ⬜ **Phase 2** — Neon Drift, Bumper Knock, Reaction Royale
-3. ⬜ **Phase 3** — friend invites & accounts
-4. ⬜ **Phase 4** — remaining 16 games
-5. ⬜ **Phase 5** — sound, screen shake polish, mobile touch
-
-## Notes & limits (phase 1)
-
-- All state lives in server memory (by design — no database yet). A restart
-  or free-tier spin-down wipes rooms.
-- Usernames aren't unique yet; presence is name-based. Accounts come later.
-- Reconnecting mid-match rejoin isn't supported (disconnecting during a match
-  eliminates you); you can rejoin a room during lobby/results within the
-  30s empty-room window.

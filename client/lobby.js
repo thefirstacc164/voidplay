@@ -1,632 +1,844 @@
-/**
- * VOIDPLAY — client/lobby.js
- * ---------------------------------------------------------------------------
- * Single-page-app controller for screens 1-5:
- *   1 TITLE     logo + username
- *   2 MENU      create / join / friends
- *   3 ROOM      player list, 20-game selector grid, host START, chat
- *   4 GAME      engine takes over (canvas + HUD), ESC overlay
- *   5 RESULTS   winner, ranking, confetti, play-again / lobby / change game
- *
- * Also owns: friend list (localStorage) + presence, toasts, the connection
- * modal and best-effort auto-rejoin after a network blip.
- * ---------------------------------------------------------------------------
- */
-(function () {
+(function (root) {
   'use strict';
 
-  const VP = window.VP;
-  const COLORS = VP.colors;
+  var VP = root.VP;
+  var net = VP.net;
+  var ITEMS = VP.ITEMS;
+  var $ = function (id) { return document.getElementById(id); };
 
-  const $ = (id) => document.getElementById(id);
+  var RANK_REWARDS = [60, 30, 15, 10];
+  var PLAY_BONUS = 10;
 
-  const LS_NAME = 'voidplay.username';
-  const LS_FRIENDS = 'voidplay.friends';
-
-  // ==========================================================================
-  // Game catalog — 20 games. `ready` games have a renderer in VP_GAMES and a
-  // server implementation; the rest ship as locked cards until later phases.
-  // ==========================================================================
-
-  const CATALOG = [
-    { id: 'tileCollapse', name: 'Tile Collapse', icon: '🧱', ready: true, min: 2 },
-    { id: 'neonDrift', name: 'Neon Drift', icon: '🏎️', soon: true },
-    { id: 'skyClimb', name: 'Sky Climb', icon: '🧗', soon: true },
-    { id: 'infected', name: 'Infected', icon: '☣️', soon: true },
-    { id: 'bumperKnock', name: 'Bumper Knock', icon: '🥊', soon: true },
-    { id: 'reactionRoyale', name: 'Reaction Royale', icon: '⚡', soon: true },
-    { id: 'orbitDodge', name: 'Orbit Dodge', icon: '🪐', soon: true },
-    { id: 'bombTag', name: 'Bomb Tag', icon: '💣', soon: true },
-    { id: 'colorRaid', name: 'Color Raid', icon: '🎨', soon: true },
-    { id: 'lavaFloor', name: 'Lava Floor', icon: '🌋', soon: true },
-    { id: 'laserMaze', name: 'Laser Maze', icon: '🔺', soon: true },
-    { id: 'snakePit', name: 'Snake Pit', icon: '🐍', soon: true },
-    { id: 'hoverHockey', name: 'Hover Hockey', icon: '🏒', soon: true },
-    { id: 'pixelPaint', name: 'Pixel Paint', icon: '🖌️', soon: true },
-    { id: 'gravityWell', name: 'Gravity Well', icon: '🌑', soon: true },
-    { id: 'turboTag', name: 'Turbo Tag', icon: '🏃', soon: true },
-    { id: 'asteroidStorm', name: 'Asteroid Storm', icon: '☄️', soon: true },
-    { id: 'mazeRacer', name: 'Maze Racer', icon: '🌀', soon: true },
-    { id: 'juggernaut', name: 'Juggernaut', icon: '🛡️', soon: true },
-    { id: 'kingOfTheHill', name: 'King of the Hill', icon: '👑', soon: true },
-  ];
-
-  const byId = {};
-  for (const g of CATALOG) byId[g.id] = g;
-
-  // ==========================================================================
-  // App state
-  // ==========================================================================
-
-  const app = {
-    name: '',
-    screen: 'title',
-    room: null,          // mirror of server room snapshot
-    myId: 0,
-    friends: [],
-    presence: {},        // lowerName → { online, room }
-    hadRoomBeforeDrop: null,
-    confettiStop: null,
+  var state = {
+    name: 'Guest',
+    authed: false,
+    profile: null,
+    token: null,
+    manifest: null,
+    loadMode: null,
+    wallet: 0,
+    room: null,
+    myPid: null,
+    lastPicked: null,
+    pendingGame: null,
+    friends: {},
+    botCount: 1,
+    shopTab: 'shape',
+    lastResult: null,
+    remoteMode: false,
   };
 
-  // ==========================================================================
-  // Screen helpers
-  // ==========================================================================
+  function lsGet(k, d) {
+    try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; }
+  }
+  function lsSet(k, v) {
+    try { localStorage.setItem(k, v); } catch (e) {}
+  }
+
+  state.token = lsGet('vp.token', null);
+  state.loadMode = lsGet('vp.loadMode', null);
+  state.wallet = parseInt(lsGet('vp.coins', '0'), 10) || 0;
+
+  function saveWallet() { lsSet('vp.coins', String(state.wallet)); }
+
+  function toast(text, kind, actionLabel, actionFn) {
+    var t = document.createElement('div');
+    t.className = 'toast' + (kind ? ' ' + kind : '');
+    t.textContent = text;
+    if (actionLabel) {
+      var b = document.createElement('button');
+      b.className = 'btn tiny';
+      b.textContent = actionLabel;
+      b.onclick = function () { actionFn(); t.remove(); };
+      t.appendChild(b);
+    }
+    $('toasts').appendChild(t);
+    setTimeout(function () { t.remove(); }, actionLabel ? 9000 : 3600);
+  }
 
   function show(screen) {
-    app.screen = screen;
-    for (const s of document.querySelectorAll('.screen')) s.classList.remove('active');
+    var els = document.querySelectorAll('.screen');
+    for (var i = 0; i < els.length; i++) els[i].classList.remove('active');
     $('screen-' + screen).classList.add('active');
   }
 
-  function toast(msg, isError) {
-    const el = document.createElement('div');
-    el.className = 'toast' + (isError ? ' error' : '');
-    el.textContent = msg;
-    $('toast-dock').appendChild(el);
-    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 2600);
-    setTimeout(() => el.remove(), 3000);
+  function me() {
+    return {
+      name: state.name,
+      shape: state.authed && state.profile ? state.profile.shape : 'sq',
+      trail: state.authed && state.profile ? state.profile.trail : 't0',
+    };
   }
 
-  let modalAction = null;
-  function modal(title, sub, btnLabel, action) {
-    $('modal-title').textContent = title;
-    $('modal-sub').textContent = sub || '';
-    $('modal-btn').textContent = btnLabel || 'OK';
-    modalAction = action;
-    $('modal').classList.remove('hidden');
-  }
-  $('modal-btn').addEventListener('click', () => {
-    $('modal').classList.add('hidden');
-    if (modalAction) { const a = modalAction; modalAction = null; a(); }
-  });
-
-  // ==========================================================================
-  // Friends (localStorage + server presence)
-  // ==========================================================================
-
-  function loadFriends() {
-    try { app.friends = JSON.parse(localStorage.getItem(LS_FRIENDS)) || []; }
-    catch (e) { app.friends = []; }
-    if (!Array.isArray(app.friends)) app.friends = [];
-  }
-  function saveFriends() {
-    localStorage.setItem(LS_FRIENDS, JSON.stringify(app.friends));
-    sendWatch();
+  function coinDisplay() {
+    $('coin-count').textContent = state.authed && state.profile ? state.profile.coins : state.wallet;
   }
 
-  function sendWatch() {
-    VP.net.send(VP.net.MSG.SOCIAL, { e: 'watch', f: app.friends });
+  function nameDisplay() {
+    $('me-chip').textContent = state.authed ? state.name : state.name + ' · guest';
+  }
+
+  function setAccountUi() {
+    var authbox = $('account-auth');
+    var panel = $('account-panel');
+    if (state.authed) {
+      authbox.classList.add('hidden');
+      panel.classList.remove('hidden');
+      $('account-title').textContent = state.profile.name;
+      $('account-stats').innerHTML =
+        '<div><b>' + state.profile.coins + '</b>coins</div>' +
+        '<div><b>' + state.profile.stats.plays + '</b>plays</div>' +
+        '<div><b>' + state.profile.stats.wins + '</b>wins</div>';
+      renderShop();
+      sendWatch();
+      renderFriends();
+    } else {
+      authbox.classList.remove('hidden');
+      panel.classList.add('hidden');
+    }
+    coinDisplay();
+    nameDisplay();
+  }
+
+  function parseItems(items) {
+    var out = [];
+    for (var i = 0; i < items.length; i++) {
+      var parts = items[i].split(':');
+      out.push({ k: parts[0] === 't' ? 'trail' : 'shape', id: parts.slice(1).join(':') });
+    }
+    return out;
+  }
+
+  function shopCatalog(kind) {
+    return kind === 'trail' ? ITEMS.TRAILS : ITEMS.SHAPES;
+  }
+
+  function renderShop() {
+    if (!state.profile) return;
+    var grid = $('shop-grid');
+    grid.innerHTML = '';
+    var list = shopCatalog(state.shopTab);
+    var equipped = state.shopTab === 'trail' ? state.profile.trail : state.profile.shape;
+    var owned = parseItems(state.profile.items);
+    for (var i = 0; i < list.length; i++) {
+      (function (it) {
+        var isOwned = it.price === 0 || owned.some(function (o) { return o.k === state.shopTab && o.id === it.id; });
+        var b = document.createElement('button');
+        b.className = 'shop-item' + (it.id === equipped ? ' equipped' : '');
+        var label = it.price === 0 ? 'free' : isOwned ? 'owned' : it.price + ' ¢';
+        b.innerHTML = '<div class="si-icon">' + (state.shopTab === 'shape' ? '◆' : '➤') + '</div>' +
+          '<div class="si-name">' + it.name + '</div>' +
+          '<div class="si-price' + (isOwned ? ' owned' : '') + '">' + (it.id === equipped ? 'EQUIPPED' : label) + '</div>';
+        b.onclick = function () {
+          if (it.id === equipped) return;
+          if (isOwned) net.send(4, { e: 'equip', k: state.shopTab, id: it.id });
+          else net.send(4, { e: 'buy', k: state.shopTab, id: it.id });
+        };
+        grid.appendChild(b);
+      })(list[i]);
+    }
+  }
+
+  function openModal(id) { $(id).classList.remove('hidden'); }
+  function closeModal(id) { $(id).classList.add('hidden'); }
+
+  function loadManifest(cb) {
+    fetch('/games.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }).then(function (m) {
+      state.manifest = m;
+      VP.ASSET_V = m.v;
+      cb(null, m);
+    }).catch(function (err) { cb(err); });
+  }
+
+  function totalSize() {
+    if (!state.manifest) return 0;
+    var sum = 0;
+    for (var i = 0; i < state.manifest.games.length; i++) sum += state.manifest.games[i].gzip;
+    return sum;
+  }
+
+  function kb(n) { return (n / 1024).toFixed(0) + ' KB'; }
+
+  function renderLibrary() {
+    var grid = $('library-grid');
+    grid.innerHTML = '';
+    for (var i = 0; i < state.manifest.games.length; i++) {
+      (function (g) {
+        var b = document.createElement('button');
+        b.className = 'game-card' + (VP.engine.isLoaded(g.id) ? ' loaded' : '');
+        b.innerHTML = '<div class="gc-icon">' + g.icon + '</div>' +
+          '<div class="gc-name">' + g.name + '</div>' +
+          '<div class="gc-desc">' + g.desc + '</div>' +
+          '<div class="gc-meta">' + g.min + '-' + g.max + ' players · ' + kb(g.gzip) + (VP.engine.isLoaded(g.id) ? ' · loaded' : ' · tap to load') + '</div>';
+        b.onclick = function () { openStart(g); };
+        grid.appendChild(b);
+      })(state.manifest.games[i]);
+    }
+  }
+
+  function openLibrary() {
+    if (!state.manifest) {
+      loadManifest(function () { openLibrary(); });
+      return;
+    }
+    if (!state.loadMode) {
+      $('loadmode-size').textContent = kb(totalSize());
+      openModal('modal-loadmode');
+      show('library');
+      renderLibrary();
+      return;
+    }
+    show('library');
+    renderLibrary();
+    if (state.loadMode === 'all') loadAll();
+  }
+
+  function loadAll() {
+    var games = state.manifest.games;
+    var done = 0;
+    for (var i = 0; i < games.length; i++) {
+      (function (g) {
+        VP.engine.loadGame(g.id, function () {
+          done++;
+          $('lib-progress').textContent = done < games.length ? 'loading ' + done + ' / ' + games.length : done + ' games ready';
+          if (done >= games.length) {
+            renderLibrary();
+            setTimeout(function () { $('lib-progress').textContent = ''; }, 2500);
+          }
+        });
+      })(games[i]);
+    }
+  }
+
+  function openStart(g) {
+    state.pendingGame = g;
+    $('start-head').textContent = g.icon + ' ' + g.name;
+    $('start-desc').textContent = g.desc;
+    $('start-instr').textContent = g.instr;
+    setBots(state.botCount);
+    openModal('modal-start');
+  }
+
+  function setBots(n) {
+    state.botCount = n;
+    var opts = document.querySelectorAll('.bot-opt');
+    for (var i = 0; i < opts.length; i++) {
+      opts[i].classList.toggle('active', parseInt(opts[i].getAttribute('data-n'), 10) === n);
+    }
+  }
+
+  function ensureRoom(cb) {
+    if (state.room) return cb();
+    net.send(3, { e: 'create' });
+    var wait = setInterval(function () {
+      if (state.room) { clearInterval(wait); cb(); }
+    }, 60);
+    setTimeout(function () { clearInterval(wait); }, 4000);
+  }
+
+  function startMode(mode) {
+    var g = state.pendingGame;
+    if (!g) return;
+    closeModal('modal-start');
+    if (mode === 'online') {
+      ensureRoom(function () {
+        state.lastPicked = g.id;
+        net.send(3, { e: 'pick', g: g.id });
+        show('room');
+        renderRoom();
+        $('room-hint').textContent = 'share the code — add bots or wait for friends, then hit start';
+      });
+      return;
+    }
+    var bots = mode === '2p' ? Math.min(state.botCount, 2) : state.botCount;
+    show('game');
+    VP.engine.attach($('game-canvas'));
+    VP.engine.fitCanvas();
+    $('game-name-label').textContent = g.name.toUpperCase();
+    $('conn-status').textContent = mode === '2p' ? 'LOCAL · 2P' : 'LOCAL · SOLO';
+    VP.engine.startLocal(g.id, mode, bots, me(), onLocalEnd);
+  }
+
+  function onLocalEnd(result) {
+    var pos = result.rank ? result.rank.indexOf(1) : 0;
+    var reward = (RANK_REWARDS[pos] !== undefined ? RANK_REWARDS[pos] : 10) + PLAY_BONUS;
+    state.wallet += reward;
+    saveWallet();
+    coinDisplay();
+    showResults(result, reward, true);
+  }
+
+  function showResults(result, reward, local) {
+    state.lastResult = { result: result, local: local };
+    var names = {};
+    var view = VP.engine.E.mode === 'local' && VP.engine.E.st ? VP.engine.E.st.p : null;
+    if (view) for (var k in view) names[k] = view[k].name;
+    if (state.room) {
+      for (var i = 0; i < state.room.players.length; i++) names[state.room.players[i].i] = state.room.players[i].n;
+    }
+    var title = result.w === null ? 'DRAW' : (result.w === state.myPid || (local && result.w === 1) ? 'YOU WIN' : (names[result.w] || 'PLAYER') + ' WINS');
+    if (result.w !== null && !local && state.room) {
+      var winnerRow = state.room.players.filter(function (p) { return p.i === result.w; })[0];
+      if (winnerRow && winnerRow.bot) title = winnerRow.n + ' WINS';
+    }
+    $('results-title').textContent = title;
+    var list = $('results-list');
+    list.innerHTML = '';
+    var rank = result.rank || [];
+    for (var j = 0; j < rank.length; j++) {
+      var pid = rank[j];
+      var row = document.createElement('div');
+      row.className = 'results-row' + (j === 0 ? ' winner' : '');
+      var sc = result.sc && result.sc[pid] !== undefined ? ' · ' + result.sc[pid] : '';
+      row.innerHTML = '<span class="rr-pos">' + (j + 1) + '</span><span>' + (names[pid] || 'Player ' + pid) + sc + '</span>';
+      list.appendChild(row);
+    }
+    $('results-reward').textContent = reward !== null ? '+' + reward + ' coins' : '';
+    $('btn-again').classList.remove('hidden');
+    $('btn-results-lobby').classList.toggle('hidden', !state.room);
+    $('btn-results-menu').classList.remove('hidden');
+    $('results').classList.remove('hidden');
+  }
+
+  function hideResults() {
+    $('results').classList.add('hidden');
+  }
+
+  function renderRoom() {
+    if (!state.room) return;
+    $('room-code').textContent = state.room.code;
+    $('room-phase').textContent = state.room.phase === 'playing' ? 'IN PLAY' : state.room.phase.toUpperCase();
+    var box = $('room-players');
+    box.innerHTML = '';
+    for (var i = 0; i < state.room.players.length; i++) {
+      (function (p) {
+        var row = document.createElement('div');
+        row.className = 'player-row';
+        var colors = VP.S.COLORS;
+        var dot = '<span class="pr-slot" style="background:' + colors[(p.s - 1) % 4] + ';color:' + colors[(p.s - 1) % 4] + '"></span>';
+        row.innerHTML = dot + '<span class="pr-name">' + escapeHtml(p.n) + '</span>' +
+          (p.bot ? '<span class="pr-bot">BOT</span>' : '') +
+          (p.i === state.room.host ? '<span class="pr-host">HOST</span>' : '') +
+          (p.i === state.myPid ? '<span class="pr-bot">YOU</span>' : '');
+        box.appendChild(row);
+      })(state.room.players[i]);
+    }
+    var gameName = state.room.game ? gameById(state.room.game) : null;
+    $('room-game-name').textContent = gameName ? gameName.icon + ' ' + gameName.name : 'no game picked yet — open the library to choose one';
+    var isHost = state.myPid === state.room.host;
+    $('btn-start').disabled = !isHost;
+    $('btn-bot-add').disabled = !isHost;
+    $('btn-bot-del').disabled = !isHost;
+    var min = gameName ? gameName.min : 2;
+    $('btn-start').textContent = state.room.players.length < min ? 'START (NEED ' + min + ')' : 'START';
+    $('room-hint').textContent = isHost ? '' : 'waiting for the host to start…';
+  }
+
+  function gameById(id) {
+    if (!state.manifest) return null;
+    for (var i = 0; i < state.manifest.games.length; i++) {
+      if (state.manifest.games[i].id === id) return state.manifest.games[i];
+    }
+    return null;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function chatLine(name, text, color) {
+    var log = $('chat-log');
+    var div = document.createElement('div');
+    div.innerHTML = '<span class="cl-name" style="color:' + (color || '#00fff2') + '">' + escapeHtml(name) + '</span> ' + escapeHtml(text);
+    log.appendChild(div);
+    while (log.children.length > 60) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+    VP.engine.pushChat(name + ': ' + text);
+  }
+
+  function pickGameFromRoom() {
+    if (!state.manifest) return;
+    openLibrary();
   }
 
   function renderFriends() {
-    const list = $('friend-list');
+    var list = $('friend-list');
     list.innerHTML = '';
-    if (!app.friends.length) {
-      const li = document.createElement('li');
-      li.className = 'friend-empty';
-      li.textContent = 'no friends yet — add someone\'s username above';
-      list.appendChild(li);
+    if (!state.authed || !state.profile) {
+      list.innerHTML = '<div class="friend-empty">log in to<br>see your friends</div>';
       return;
     }
-    for (const name of app.friends) {
-      const pres = app.presence[name.toLowerCase()] || {};
-      const li = document.createElement('li');
-      li.className = 'friend-row' + (pres.online ? ' online' : '');
-
-      const dot = document.createElement('span');
-      dot.className = 'friend-dot';
-      dot.title = pres.online ? 'online' : 'offline';
-
-      const nm = document.createElement('span');
-      nm.className = 'friend-name';
-      nm.textContent = name;
-
-      li.appendChild(dot);
-      li.appendChild(nm);
-
-      if (pres.online && pres.room) {
-        const roomBtn = document.createElement('button');
-        roomBtn.className = 'friend-room';
-        roomBtn.textContent = pres.room;
-        roomBtn.title = 'Join room ' + pres.room;
-        roomBtn.addEventListener('click', () => {
-          if (app.room) return toast('Leave your current room first', true);
-          VP.net.send(VP.net.MSG.ROOM, { e: 'join', code: pres.room });
-        });
-        li.appendChild(roomBtn);
-      }
-
-      const x = document.createElement('button');
-      x.className = 'friend-x';
-      x.textContent = '✕';
-      x.title = 'Remove friend';
-      x.addEventListener('click', () => {
-        app.friends = app.friends.filter((f) => f !== name);
-        saveFriends();
-        renderFriends();
-      });
-      li.appendChild(x);
-      list.appendChild(li);
-    }
-  }
-
-  $('btn-add-friend').addEventListener('click', addFriend);
-  $('friend-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addFriend(); });
-  function addFriend() {
-    const input = $('friend-name');
-    const name = input.value.trim().slice(0, 16);
-    if (!name) return;
-    if (app.friends.includes(name)) { input.value = ''; return; }
-    if (app.friends.length >= 50) return toast('Friend list is full', true);
-    app.friends.push(name);
-    input.value = '';
-    saveFriends();
-    renderFriends();
-  }
-
-  // ==========================================================================
-  // Screen 1 — title
-  // ==========================================================================
-
-  $('username').value = localStorage.getItem(LS_NAME) || '';
-
-  function enterMenu() {
-    const name = $('username').value.replace(/\s+/g, ' ').trim().slice(0, 16);
-    if (!name) { toast('Enter a username first', true); $('username').focus(); return; }
-    app.name = name;
-    localStorage.setItem(LS_NAME, name);
-    $('menu-username').textContent = name.toUpperCase();
-    show('menu');
-    renderFriends();
-    VP.net.send(VP.net.MSG.SOCIAL, { e: 'hello', name });
-    sendWatch();
-  }
-
-  $('btn-continue').addEventListener('click', enterMenu);
-  $('username').addEventListener('keydown', (e) => { if (e.key === 'Enter') enterMenu(); });
-  $('btn-rename').addEventListener('click', () => { show('title'); $('username').focus(); });
-
-  // ==========================================================================
-  // Screen 2 — main menu
-  // ==========================================================================
-
-  $('btn-create').addEventListener('click', () => {
-    VP.net.send(VP.net.MSG.ROOM, { e: 'create' });
-  });
-
-  function tryJoin() {
-    const code = $('join-code').value.trim().toUpperCase();
-    if (!/^[A-Z]{4}$/.test(code)) { toast('Room codes are 4 letters', true); return; }
-    VP.net.send(VP.net.MSG.ROOM, { e: 'join', code });
-  }
-  $('btn-join').addEventListener('click', tryJoin);
-  $('join-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryJoin(); });
-
-  // ==========================================================================
-  // Screen 3 — room lobby
-  // ==========================================================================
-
-  function buildGameGrid() {
-    const grid = $('game-grid');
-    for (const g of CATALOG) {
-      const card = document.createElement('button');
-      card.className = 'game-card' + (g.soon ? ' locked' : '');
-      card.dataset.game = g.id;
-      card.innerHTML =
-        (g.soon ? '<span class="gc-soon">SOON</span>' : '') +
-        '<div class="gc-icon"></div>' +
-        '<div class="gc-name"></div>';
-      card.querySelector('.gc-icon').textContent = g.icon;
-      card.querySelector('.gc-name').textContent = g.name;
-      card.addEventListener('click', () => selectGame(g.id));
-      grid.appendChild(card);
-    }
-  }
-
-  function selectGame(id) {
-    const g = byId[id];
-    if (g.soon) { renderGameDetail(id); return; }         // everyone can browse
-    if (!app.room || app.myId !== app.room.host) {         // non-hosts just view
-      renderGameDetail(id);
+    var friends = state.profile.friends;
+    if (!friends.length) {
+      list.innerHTML = '<div class="friend-empty">no friends yet<br>add one from your account</div>';
       return;
     }
-    VP.net.send(VP.net.MSG.ROOM, { e: 'pick', g: id });
+    for (var i = 0; i < friends.length; i++) {
+      (function (key) {
+        var pres = state.friends[key] || [key, 0, null];
+        var row = document.createElement('div');
+        row.className = 'friend-row';
+        row.innerHTML = '<span class="friend-dot' + (pres[1] ? ' on' : '') + '"></span>' +
+          '<span class="friend-name">' + escapeHtml(pres[0]) + '</span>' +
+          (pres[2] ? '<span class="friend-room">' + pres[2] + '</span>' : '');
+        row.onclick = function () { friendMenu(key); };
+        list.appendChild(row);
+      })(friends[i]);
+    }
   }
 
-  function renderGameDetail(id) {
-    const g = byId[id];
-    const el = $('game-detail');
-    if (!g) { el.innerHTML = '<div class="gd-desc">pick a game</div>'; return; }
-    const mod = window.VP_GAMES && window.VP_GAMES[id];
-    el.innerHTML = '';
-    const t = document.createElement('div');
-    t.className = 'gd-title';
-    t.textContent = g.icon + '  ' + g.name.toUpperCase();
-    el.appendChild(t);
+  function friendMenu(key) {
+    var pres = state.friends[key] || [key, 0, null];
+    var box = $('invite-list');
+    box.innerHTML = '';
+    var title = document.createElement('div');
+    title.style.cssText = 'font-size:13px;font-weight:700;text-align:center;margin-bottom:4px';
+    title.textContent = pres[0];
+    box.appendChild(title);
 
-    if (g.soon) {
-      const s = document.createElement('div');
-      s.className = 'gd-desc';
-      s.textContent = 'Coming in a later phase.';
-      el.appendChild(s);
-      const n = document.createElement('div');
-      n.className = 'gd-soon';
-      n.textContent = '🔒 LOCKED — NOT IN THIS BUILD YET';
-      el.appendChild(n);
-      return;
+    function addAction(label, fn) {
+      var row = document.createElement('div');
+      row.className = 'invite-row';
+      row.innerHTML = '<span>' + label + '</span>';
+      var b = document.createElement('button');
+      b.className = 'btn tiny';
+      b.textContent = 'GO';
+      b.onclick = function () { closeModal('modal-invite'); fn(); };
+      row.appendChild(b);
+      box.appendChild(row);
     }
 
-    const d = document.createElement('div');
-    d.className = 'gd-desc';
-    d.textContent = DESCRIPTIONS[id] || '';
-    el.appendChild(d);
-
-    const i = document.createElement('div');
-    i.className = 'gd-instr';
-    i.textContent = mod && mod.getInstructions ? '🎮 ' + mod.getInstructions() : '';
-    el.appendChild(i);
-  }
-
-  // Descriptions for ready games (kept in sync with the server CONFIGs).
-  const DESCRIPTIONS = {
-    tileCollapse: 'Hop across a grid of neon tiles that crack and fall behind you. Outlive everyone else. 2-4 players.',
-  };
-
-  function renderRoom() {
-    const room = app.room;
-    if (!room) return;
-
-    $('lobby-code').textContent = room.code;
-
-    // player list
-    const ul = $('lobby-players');
-    ul.innerHTML = '';
-    for (let slot = 1; slot <= 4; slot++) {
-      const p = room.players.find((r) => r.s === slot);
-      const li = document.createElement('li');
-      if (!p) {
-        li.className = 'player-row';
-        li.innerHTML = '<span class="player-chip" style="background:rgba(255,255,255,0.06)"></span>' +
-          '<span class="player-name" style="opacity:0.3">EMPTY SLOT</span>';
-      } else {
-        li.className = 'player-row';
-        const chip = document.createElement('span');
-        chip.className = 'player-chip';
-        chip.style.background = COLORS[(p.s - 1) % 4];
-        chip.style.boxShadow = '0 0 8px ' + COLORS[(p.s - 1) % 4];
-        const nm = document.createElement('span');
-        nm.className = 'player-name';
-        nm.textContent = p.n;
-        const tags = document.createElement('span');
-        tags.className = 'player-tags';
-        if (p.i === room.host) tags.innerHTML += '<span class="tag host">HOST</span>';
-        if (p.i === app.myId) tags.innerHTML += '<span class="tag you">YOU</span>';
-        li.appendChild(chip); li.appendChild(nm); li.appendChild(tags);
-      }
-      ul.appendChild(li);
-    }
-    $('lobby-count').textContent = room.players.length + ' / 4';
-
-    // game grid selection
-    for (const card of $('game-grid').children) {
-      card.classList.toggle('selected', card.dataset.game === room.game);
-    }
-    renderGameDetail(room.game);
-
-    // start button
-    const g = byId[room.game];
-    const isHost = app.myId === room.host;
-    const enough = g && !g.soon && room.players.length >= (g.min || 2);
-    const btn = $('btn-start');
-    btn.disabled = !(isHost && enough && room.phase !== 'playing');
-    btn.textContent = room.phase === 'results' ? 'BACK TO LOBBY FIRST' : 'START';
-    $('start-hint').textContent = !isHost ? 'the host starts the match'
-      : !room.game ? 'pick a game from the grid'
-      : !enough ? 'need at least ' + (g.min || 2) + ' players'
-      : byId[room.game].name.toUpperCase() + ' is ready — go!';
-  }
-
-  $('btn-copy-code').addEventListener('click', () => {
-    const code = app.room && app.room.code;
-    if (!code) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(code).then(
-        () => toast('Room code ' + code + ' copied'),
-        () => toast(code)
-      );
-    } else toast(code);
-  });
-
-  $('btn-leave').addEventListener('click', () => {
-    VP.net.send(VP.net.MSG.ROOM, { e: 'leave' });
-  });
-
-  $('btn-start').addEventListener('click', () => {
-    if (!app.room) return;
-    if (app.room.phase === 'results') {
-      VP.net.send(VP.net.MSG.ROOM, { e: 'lobby' });
-    } else {
-      VP.net.send(VP.net.MSG.ROOM, { e: 'start' });
-    }
-  });
-
-  // -- lobby chat ------------------------------------------------------------
-
-  function pushChat(n, t, color) {
-    const log = $('chat-log');
-    const b = document.createElement('b');
-    b.textContent = n + ': ';
-    if (color) b.style.color = color;
-    const span = document.createElement('span');
-    span.textContent = t;
-    log.innerHTML = '';
-    log.appendChild(b);
-    log.appendChild(span);
-  }
-
-  function sendChat() {
-    const input = $('chat-input');
-    const t = input.value.trim().slice(0, 200);
-    if (!t || !app.room) return;
-    VP.net.send(VP.net.MSG.SOCIAL, { e: 'chat', t });
-    input.value = '';
-  }
-  $('btn-chat-send').addEventListener('click', sendChat);
-  $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
-
-  // ==========================================================================
-  // Screen 4 — in-game extras (engine handles the canvas)
-  // ==========================================================================
-
-  $('btn-stay').addEventListener('click', () => $('leave-overlay').classList.add('hidden'));
-  $('btn-leave-match').addEventListener('click', () => {
-    $('leave-overlay').classList.add('hidden');
-    VP.net.send(VP.net.MSG.ROOM, { e: 'leave' });
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && app.screen === 'game') {
-      $('leave-overlay').classList.toggle('hidden');
-    }
-  });
-
-  // ==========================================================================
-  // Screen 5 — results
-  // ==========================================================================
-
-  const REASONS = {
-    'last-standing': 'LAST ONE STANDING',
-    'void': 'THE VOID CLAIMS EVERYONE',
-    'timeout': "TIME'S UP",
-    'error': 'MATCH INTERRUPTED',
-  };
-
-  function showResults(result, room) {
-    VP.engine.stop();
-    if (app.confettiStop) { app.confettiStop(); app.confettiStop = null; }
-
-    const roster = {};
-    for (const r of room.players) roster[String(r.i)] = r;
-
-    const title = $('results-title');
-    if (result.w !== null && result.w !== undefined && roster[String(result.w)]) {
-      const w = roster[String(result.w)];
-      const color = COLORS[(w.s - 1) % 4];
-      title.textContent = w.n.toUpperCase() + ' WINS';
-      title.style.color = color;
-      app.confettiStop = confetti(color);
-    } else {
-      title.textContent = 'NOBODY SURVIVES';
-      title.style.color = '#ff00e4';
-      app.confettiStop = confetti('#ff00e4');
-    }
-    $('results-sub').textContent = REASONS[result.reason] || '';
-
-    const board = $('results-board');
-    board.innerHTML = '';
-    const rank = result.rank || [];
-    for (let i = 0; i < rank.length; i++) {
-      const r = roster[String(rank[i])];
-      if (!r) continue;
-      const li = document.createElement('li');
-      li.className = 'results-row' + (rank[i] === result.w ? ' winner' : '');
-      li.innerHTML =
-        '<span class="place">' + (i + 1) + '</span>' +
-        '<span class="player-chip" style="background:' + COLORS[(r.s - 1) % 4] + ';box-shadow:0 0 8px ' + COLORS[(r.s - 1) % 4] + '"></span>' +
-        '<span class="player-name"></span>' +
-        '<span class="note">' + (rank[i] === result.w ? 'WINNER' : 'FELL') + '</span>';
-      li.querySelector('.player-name').textContent = r.n;
-      board.appendChild(li);
-    }
-
-    const isHost = app.myId === room.host;
-    $('btn-again').disabled = !isHost;
-    $('btn-back-lobby').disabled = !isHost;
-    $('btn-change-game').disabled = !isHost;
-    $('results-wait').classList.toggle('hidden', isHost);
-    show('results');
-  }
-
-  $('btn-again').addEventListener('click', () => {
-    VP.net.send(VP.net.MSG.ROOM, { e: 'again' });
-  });
-  $('btn-back-lobby').addEventListener('click', () => {
-    VP.net.send(VP.net.MSG.ROOM, { e: 'lobby' });
-  });
-  $('btn-change-game').addEventListener('click', () => {
-    VP.net.send(VP.net.MSG.ROOM, { e: 'lobby' });
-    app.focusGameGrid = true;          // pulse the grid when the lobby shows
-  });
-
-  function confetti(color) {
-    const canvas = $('results-canvas');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width = canvas.clientWidth || innerWidth;
-    const H = canvas.height = canvas.clientHeight || innerHeight;
-    const colors = [color, '#ffffff', '#00fff2', '#ff00e4'];
-    const parts = [];
-    for (let i = 0; i < 130; i++) {
-      parts.push({
-        x: Math.random() * W, y: -20 - Math.random() * H * 0.5,
-        vx: (Math.random() - 0.5) * 40, vy: 60 + Math.random() * 120,
-        s: 3 + Math.random() * 5, rot: Math.random() * Math.PI,
-        vr: (Math.random() - 0.5) * 6, c: colors[(Math.random() * colors.length) | 0],
-      });
-    }
-    let raf = 0, last = performance.now(), alive = true;
-    (function loop(now) {
-      if (!alive) return;
-      const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      ctx.clearRect(0, 0, W, H);
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (const p of parts) {
-        p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
-        if (p.y > H + 20) { p.y = -20; p.x = Math.random() * W; }
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot);
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle = p.c;
-        ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.6);
-        ctx.restore();
-      }
-      ctx.restore();
-      raf = requestAnimationFrame(loop);
-    })(last);
-    return function stop() { alive = false; cancelAnimationFrame(raf); ctx.clearRect(0, 0, W, H); };
-  }
-
-  // ==========================================================================
-  // Network wiring
-  // ==========================================================================
-
-  VP.net.on(VP.net.MSG.ROOM, function (ev) {
-    switch (ev.e) {
-      case 'created':
-      case 'joined': {
-        app.room = ev.room;
-        app.myId = ev.you;
-        app.hadRoomBeforeDrop = ev.room.code;
-        show('lobby');
+    if (state.room) addAction('invite to room ' + state.room.code, function () {
+      net.send(4, { e: 'invite', to: pres[0] });
+      toast('invite sent to ' + pres[0]);
+    });
+    if (pres[2]) addAction('join their room ' + pres[2], function () {
+      net.send(3, { e: 'join', code: pres[2] });
+    });
+    addAction('quick play', function () {
+      ensureRoom(function () {
+        var games = state.manifest.games;
+        var g = games[(Math.random() * games.length) | 0];
+        net.send(3, { e: 'pick', g: g.id });
+        net.send(4, { e: 'invite', to: pres[0], g: g.id });
+        toast('invited ' + pres[0] + ' to ' + g.name, 'good');
+        show('room');
         renderRoom();
-        if (app.focusGameGrid) {
-          app.focusGameGrid = false;
-          const grid = $('game-grid');
-          grid.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-        break;
-      }
-      case 'update': {
-        if (!app.room || ev.room.code !== app.room.code) break;
-        app.room = ev.room;
-        if (app.screen === 'lobby') renderRoom();
-        break;
-      }
-      case 'started': {
-        app.room = ev.room;
-        VP.lastStartedConfig = ev.config;
-        if (app.confettiStop) { app.confettiStop(); app.confettiStop = null; }
-        $('leave-overlay').classList.add('hidden');
-        VP.engine.start({
-          gameId: ev.game,
-          myId: app.myId,
-          roster: ev.room.players,
-          config: ev.config,
-          roomCode: ev.room.code,
-        });
+      });
+    });
+    addAction('remove friend', function () {
+      net.send(4, { e: 'fdel', n: pres[0] });
+    });
+    openModal('modal-invite');
+  }
+
+  function sendWatch() {
+    if (state.authed && state.profile) {
+      net.send(4, { e: 'watch', f: state.profile.friends });
+    }
+  }
+
+  function renderTrade() {
+    var sel = $('trade-target');
+    sel.innerHTML = '';
+    if (!state.room || !state.authed) return;
+    var mine = state.profile ? parseItems(state.profile.items) : [];
+    for (var i = 0; i < state.room.players.length; i++) {
+      var p = state.room.players[i];
+      if (p.bot || p.i === state.myPid) continue;
+      var opt = document.createElement('option');
+      opt.value = p.n;
+      opt.textContent = p.n;
+      sel.appendChild(opt);
+    }
+    var give = $('trade-give');
+    give.innerHTML = '';
+    give.dataset.sel = '';
+    for (var g = 0; g < mine.length; g++) {
+      (function (item) {
+        var el = document.createElement('div');
+        el.className = 'trade-item';
+        el.textContent = itemName(item.k, item.id);
+        el.onclick = function () {
+          give.dataset.sel = item.k + ':' + item.id;
+          var all = give.children;
+          for (var q = 0; q < all.length; q++) all[q].classList.remove('sel');
+          el.classList.add('sel');
+        };
+        give.appendChild(el);
+      })(mine[g]);
+    }
+    if (!mine.length) give.innerHTML = '<div class="friend-empty">you own no items yet</div>';
+    var want = $('trade-want');
+    want.innerHTML = '';
+    want.dataset.sel = '';
+    var catalog = ITEMS.SHAPES.filter(function (s) { return s.price > 0; })
+      .map(function (s) { return { k: 'shape', id: s.id }; })
+      .concat(ITEMS.TRAILS.filter(function (t) { return t.price > 0; }).map(function (t) { return { k: 'trail', id: t.id }; }));
+    for (var w = 0; w < catalog.length; w++) {
+      (function (item) {
+        var el = document.createElement('div');
+        el.className = 'trade-item';
+        el.textContent = itemName(item.k, item.id);
+        el.onclick = function () {
+          want.dataset.sel = item.k + ':' + item.id;
+          var all = want.children;
+          for (var q = 0; q < all.length; q++) all[q].classList.remove('sel');
+          el.classList.add('sel');
+        };
+        want.appendChild(el);
+      })(catalog[w]);
+    }
+  }
+
+  function itemName(kind, id) {
+    var it = ITEMS.find(kind, id);
+    return (it ? it.name : id) + ' (' + kind + ')';
+  }
+
+  function bindUi() {
+    $('btn-play').onclick = openLibrary;
+    $('btn-create').onclick = function () { net.send(3, { e: 'create' }); };
+    $('btn-join').onclick = function () {
+      var code = $('join-code').value.trim().toUpperCase();
+      if (code.length === 4) net.send(3, { e: 'join', code: code });
+      else toast('enter the 4-letter room code', 'bad');
+    };
+    $('join-code').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') $('btn-join').click();
+    });
+    $('btn-lib-back').onclick = function () { show('title'); };
+    $('btn-account').onclick = function () {
+      $('auth-msg').textContent = '';
+      openModal('modal-account');
+    };
+    document.querySelectorAll('.modal-close').forEach(function (b) {
+      b.onclick = function () { closeModal(b.getAttribute('data-close')); };
+    });
+    document.querySelectorAll('.modal').forEach(function (m) {
+      m.addEventListener('click', function (ev) { if (ev.target === m) m.classList.add('hidden'); });
+    });
+
+    $('tab-login').onclick = function () { authTab('login'); };
+    $('tab-signup').onclick = function () { authTab('signup'); };
+    $('btn-auth-go').onclick = doAuth;
+    $('auth-pass').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') doAuth(); });
+
+    $('btn-load-all').onclick = function () {
+      state.loadMode = 'all';
+      lsSet('vp.loadMode', 'all');
+      closeModal('modal-loadmode');
+      loadAll();
+    };
+    $('btn-load-manual').onclick = function () {
+      state.loadMode = 'manual';
+      lsSet('vp.loadMode', 'manual');
+      closeModal('modal-loadmode');
+    };
+
+    document.querySelectorAll('.bot-opt').forEach(function (b) {
+      b.onclick = function () { setBots(parseInt(b.getAttribute('data-n'), 10)); };
+    });
+    $('btn-mode-solo').onclick = function () { startMode('solo'); };
+    $('btn-mode-2p').onclick = function () { startMode('2p'); };
+    $('btn-mode-online').onclick = function () { startMode('online'); };
+
+    $('btn-room-leave').onclick = function () {
+      net.send(3, { e: 'leave' });
+      state.room = null;
+      show('title');
+    };
+    $('btn-bot-add').onclick = function () { net.send(3, { e: 'botadd' }); };
+    $('btn-bot-del').onclick = function () { net.send(3, { e: 'botdel' }); };
+    $('btn-trade').onclick = function () {
+      if (!state.authed) return toast('log in to trade items', 'bad');
+      if (!state.room) return;
+      renderTrade();
+      openModal('modal-trade');
+    };
+    $('btn-trade-send').onclick = function () {
+      var target = $('trade-target').value;
+      var give = $('trade-give').dataset.sel;
+      var want = $('trade-want').dataset.sel;
+      if (!target || !give || !want) return toast('pick both sides of the trade', 'bad');
+      var gp = give.split(':');
+      var wp = want.split(':');
+      net.send(3, { e: 'trade', to: target, give: { k: gp[0], id: gp[1] }, want: { k: wp[0], id: wp[1] } });
+      closeModal('modal-trade');
+      toast('offer sent to ' + target);
+    };
+    $('btn-offer-accept').onclick = function () {
+      net.send(3, { e: 'tradeok' });
+      closeModal('modal-offer');
+    };
+    $('btn-offer-decline').onclick = function () {
+      net.send(3, { e: 'tradeno' });
+      closeModal('modal-offer');
+    };
+
+    $('room-game-name').style.cursor = 'pointer';
+    $('room-game-name').onclick = pickGameFromRoom;
+
+    $('btn-start').onclick = function () { net.send(3, { e: 'start' }); };
+    $('chat-input').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      var text = ev.target.value.trim();
+      if (text) net.send(4, { e: 'chat', t: text });
+      ev.target.value = '';
+    });
+
+    document.querySelectorAll('.shop-tab').forEach(function (b) {
+      b.onclick = function () {
+        state.shopTab = b.getAttribute('data-shop');
+        document.querySelectorAll('.shop-tab').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        renderShop();
+      };
+    });
+    $('btn-logout').onclick = function () {
+      lsSet('vp.token', '');
+      state.token = null;
+      net.send(4, { e: 'logout' });
+    };
+
+    $('btn-game-exit').onclick = function () {
+      VP.engine.stop();
+      net.stopInputs();
+      hideResults();
+      if (state.room) net.send(3, { e: 'leave' });
+      state.room = null;
+      show('title');
+    };
+    $('btn-again').onclick = function () {
+      hideResults();
+      VP.engine.stop();
+      if (state.room) {
+        net.send(3, { e: 'again' });
         show('game');
-        break;
+      } else {
+        startMode('solo');
       }
-      case 'ended': {
-        app.room = ev.room;
-        showResults(ev.result, ev.room);
-        break;
+    };
+    $('btn-results-lobby').onclick = function () {
+      hideResults();
+      VP.engine.stop();
+      if (state.room) { show('room'); renderRoom(); }
+      else show('title');
+    };
+    $('btn-results-menu').onclick = function () {
+      hideResults();
+      VP.engine.stop();
+      show('title');
+    };
+
+    window.addEventListener('resize', VP.engine.fitCanvas);
+  }
+
+  var authMode = 'login';
+
+  function authTab(mode) {
+    authMode = mode;
+    $('tab-login').classList.toggle('active', mode === 'login');
+    $('tab-signup').classList.toggle('active', mode === 'signup');
+    $('btn-auth-go').textContent = mode === 'login' ? 'LOG IN' : 'CREATE ACCOUNT';
+    $('auth-msg').textContent = '';
+  }
+
+  function doAuth() {
+    var n = $('auth-name').value.trim();
+    var p = $('auth-pass').value;
+    if (!n || !p) { $('auth-msg').textContent = 'fill in both fields'; $('auth-msg').className = 'auth-msg bad'; return; }
+    if (authMode === 'login') net.send(4, { e: 'login', n: n, p: p });
+    else net.send(4, { e: 'signup', n: n, p: p });
+  }
+
+  function onAuthOk(msg) {
+    state.authed = true;
+    state.profile = msg.profile;
+    state.name = msg.name;
+    state.token = msg.token;
+    lsSet('vp.token', msg.token);
+    if (state.wallet > 0) {
+      net.send(4, { e: 'claim', c: state.wallet });
+    }
+    setAccountUi();
+    closeModal('modal-account');
+    toast('logged in as ' + msg.name, 'good');
+  }
+
+  function onProfile(profile) {
+    state.profile = profile;
+    setAccountUi();
+  }
+
+  function bindNet() {
+    net.on(2, function (msg) {
+      if (msg && VP.engine.E.mode === 'remote') VP.engine.applyState(msg);
+    });
+
+    net.on(3, function (msg) {
+      switch (msg.e) {
+        case 'created':
+        case 'joined':
+          state.room = msg.room;
+          state.myPid = msg.you;
+          show('room');
+          renderRoom();
+          break;
+        case 'update':
+          if (state.room && msg.room && msg.room.code === state.room.code) {
+            var wasPlaying = state.room.phase === 'playing';
+            state.room = msg.room;
+            if (!wasPlaying) renderRoom();
+            else if (document.getElementById('screen-room').classList.contains('active')) renderRoom();
+          }
+          break;
+        case 'started':
+          state.room = msg.room;
+          show('game');
+          hideResults();
+          VP.engine.attach($('game-canvas'));
+          VP.engine.fitCanvas();
+          $('game-name-label').textContent = (msg.config ? msg.config.name : msg.game).toUpperCase();
+          $('conn-status').textContent = 'ONLINE';
+          VP.engine.startRemote(msg.game, msg.config, state.myPid);
+          net.startInputs(VP.engine.netKeys);
+          break;
+        case 'ended':
+          state.room = msg.room;
+          VP.engine.stop();
+          net.stopInputs();
+          showResults(msg.result, null, false);
+          break;
+        case 'left':
+          state.room = null;
+          VP.engine.stop();
+          net.stopInputs();
+          show('title');
+          break;
+        case 'error':
+          toast(msg.msg, 'bad');
+          break;
+        case 'trade': {
+          $('offer-body').innerHTML = '<b>' + escapeHtml(msg.from) + '</b> offers you <b>' + escapeHtml(itemName(msg.give.k, msg.give.id)) + '</b> for your <b>' + escapeHtml(itemName(msg.want.k, msg.want.id)) + '</b>';
+          openModal('modal-offer');
+          break;
+        }
+        case 'tradeno':
+          toast('trade declined', 'bad');
+          break;
+        case 'traded':
+          toast('trade complete', 'good');
+          break;
+        default: break;
       }
-      case 'left': {
-        app.room = null;
-        app.hadRoomBeforeDrop = null;
+    });
+
+    net.on(4, function (msg) {
+      switch (msg.e) {
+        case 'hello':
+          if (!state.authed) {
+            state.name = msg.name;
+            nameDisplay();
+          }
+          break;
+        case 'auth':
+          if (msg.ok) onAuthOk(msg);
+          else {
+            $('auth-msg').textContent = msg.msg || 'failed';
+            $('auth-msg').className = 'auth-msg bad';
+            if (msg.msg && msg.msg.indexOf('expired') >= 0) {
+              lsSet('vp.token', '');
+              state.token = null;
+            }
+          }
+          break;
+        case 'profile':
+          onProfile(msg.profile);
+          break;
+        case 'buy':
+        case 'equip':
+          if (msg.ok && msg.profile) onProfile(msg.profile);
+          if (!msg.ok) toast(msg.msg, 'bad');
+          break;
+        case 'claim':
+          if (msg.ok) {
+            state.wallet = 0;
+            saveWallet();
+            if (msg.profile) onProfile(msg.profile);
+          }
+          break;
+        case 'reward':
+          toast('+' + msg.coins + ' coins' + (msg.won ? ' · winner!' : ''), 'good');
+          if (state.authed && state.profile) state.profile.coins = msg.total;
+          coinDisplay();
+          break;
+        case 'friends':
+          if (msg.ok && msg.profile) onProfile(msg.profile);
+          else if (!msg.ok) toast(msg.msg, 'bad');
+          break;
+        case 'presence':
+          for (var i = 0; i < msg.f.length; i++) {
+            state.friends[msg.f[i][0]] = msg.f[i];
+          }
+          renderFriends();
+          break;
+        case 'chat':
+          chatLine(msg.n, msg.t);
+          break;
+        case 'invite':
+          toast(msg.from + ' invited you to room ' + msg.code, 'good', 'JOIN', function () {
+            net.send(3, { e: 'join', code: msg.code });
+          });
+          break;
+        case 'logout':
+          state.authed = false;
+          state.profile = null;
+          state.name = msg.guest || 'Guest';
+          state.token = null;
+          setAccountUi();
+          renderFriends();
+          break;
+        case 'error':
+          toast(msg.msg, 'bad');
+          break;
+        default: break;
+      }
+    });
+
+    net.on('open', function () {
+      $('conn-status').textContent = 'ONLINE';
+      if (state.token) net.send(4, { e: 'login', token: state.token });
+      sendWatch();
+    });
+    net.on('close', function () {
+      $('conn-status').textContent = 'RECONNECTING…';
+      state.room = null;
+      if (VP.engine.E.mode === 'remote') {
         VP.engine.stop();
-        if (app.confettiStop) { app.confettiStop(); app.confettiStop = null; }
-        show('menu');
-        renderFriends();
-        break;
+        net.stopInputs();
+        show('title');
+        toast('connection lost — back to the menu', 'bad');
       }
-      case 'error': {
-        toast(ev.msg || 'Something went wrong', true);
-        break;
-      }
-      default: break;
-    }
-  });
+    });
 
-  VP.net.on(VP.net.MSG.SOCIAL, function (ev) {
-    if (ev.e === 'chat') {
-      const room = app.room;
-      const p = room && room.players.find((r) => r.i === ev.i);
-      const color = p ? COLORS[(p.s - 1) % 4] : '#fff';
-      if (app.screen === 'lobby') pushChat(ev.n, ev.t, color);
-      else if (app.screen === 'game') VP.engine.chatToast(ev.n, ev.t, color);
-    } else if (ev.e === 'presence') {
-      app.presence = {};
-      for (const row of ev.f || []) {
-        app.presence[row[0]] = { online: !!row[1], room: row[2] || null };
-      }
-      if (app.screen === 'menu') renderFriends();
-    }
-  });
+    net.connect();
+  }
 
-  VP.net.on('open', function () {
-    if (app.screen === 'title') return;
-    // (re)introduce ourselves and refresh friend presence
-    VP.net.send(VP.net.MSG.SOCIAL, { e: 'hello', name: app.name });
-    sendWatch();
-    // best-effort auto-rejoin after a network blip (rooms survive 30s empty)
-    if (app.hadRoomBeforeDrop && !app.room && app.screen !== 'menu') {
-      VP.net.send(VP.net.MSG.ROOM, { e: 'join', code: app.hadRoomBeforeDrop });
-      app.rejoinAttempt = (app.rejoinAttempt || 0) + 1;
-      if (app.rejoinAttempt > 1) app.hadRoomBeforeDrop = null;
-    }
-  });
+  function boot() {
+    bindUi();
+    bindNet();
+    loadManifest(function (err) {
+      if (err) toast('could not load the game list', 'bad');
+    });
+    setAccountUi();
+    show('title');
+  }
 
-  VP.net.on('close', function (evt) {
-    if (app.screen === 'title') return;
-    VP.engine.stop();
-    if (app.screen === 'game' || app.screen === 'results') {
-      show('menu');
-    }
-    if (evt && evt.wasConnected) {
-      toast('Connection lost — reconnecting…', true);
-    }
-  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 
-  // ==========================================================================
-  // Boot
-  // ==========================================================================
-
-  loadFriends();
-  buildGameGrid();
-  renderGameDetail(null);
-  VP.net.connect();
-})();
+  VP.lobby = { state: state };
+})(typeof self !== 'undefined' ? self : globalThis);
