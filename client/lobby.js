@@ -79,6 +79,8 @@
     var els = document.querySelectorAll('.screen');
     for (var i = 0; i < els.length; i++) els[i].classList.remove('active');
     $('screen-' + screen).classList.add('active');
+    state.screen = screen;
+    if (screen !== 'game') hideGameChat();
   }
 
   function me() {
@@ -207,15 +209,28 @@
   function renderLibrary() {
     var grid = $('library-grid');
     grid.innerHTML = '';
+    var fromRoom = !!state.room;
     for (var i = 0; i < state.manifest.games.length; i++) {
       (function (g) {
         var b = document.createElement('button');
-        b.className = 'game-card' + (VP.engine.isLoaded(g.id) ? ' loaded' : '');
-        b.innerHTML = '<div class="gc-icon">' + g.icon + '</div>' +
+        var picked = fromRoom && state.room.game === g.id;
+        b.className = 'game-card' + (VP.engine.isLoaded(g.id) ? ' loaded' : '') + (picked ? ' picked' : '');
+        b.innerHTML = (picked ? '<div class="gc-picked">PICKED</div>' : '') +
+          '<div class="gc-icon">' + g.icon + '</div>' +
           '<div class="gc-name">' + g.name + '</div>' +
           '<div class="gc-desc">' + g.desc + '</div>' +
           '<div class="gc-meta">' + g.min + '-' + g.max + ' players · ' + kb(g.gzip) + (VP.engine.isLoaded(g.id) ? ' · loaded' : ' · tap to load') + '</div>';
-        b.onclick = function () { openStart(g); };
+        b.onclick = function () {
+          if (fromRoom) {
+            snd('click');
+            state.lastPicked = g.id;
+            net.send(3, { e: 'pick', g: g.id });
+            show('room');
+            renderRoom();
+            return;
+          }
+          openStart(g);
+        };
         grid.appendChild(b);
       })(state.manifest.games[i]);
     }
@@ -341,7 +356,7 @@
       var pid = rank[j];
       var row = document.createElement('div');
       row.className = 'results-row' + (j === 0 ? ' winner' : '');
-      var sc = result.sc && result.sc[pid] !== undefined ? ' · ' + result.sc[pid] : '';
+      var sc = result.sc && result.sc[pid] !== undefined ? ' · ' + result.sc[pid] + (result.lowWins ? 's it' : '') : '';
       row.innerHTML = '<span class="rr-pos">' + (j + 1) + '</span><span>' + (names[pid] || 'Player ' + pid) + sc + '</span>';
       list.appendChild(row);
     }
@@ -350,6 +365,11 @@
     $('btn-results-lobby').classList.toggle('hidden', !state.room);
     $('btn-results-menu').classList.remove('hidden');
     $('results').classList.remove('hidden');
+  }
+
+  function hideGameChat() {
+    $('game-chat').classList.add('hidden');
+    $('game-chat-input').blur();
   }
 
   function hideResults() {
@@ -585,7 +605,7 @@
     $('join-code').addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter') $('btn-join').click();
     });
-    $('btn-lib-back').onclick = function () { show('title'); };
+    $('btn-lib-back').onclick = function () { snd('back'); show(state.room ? 'room' : 'title'); };
     $('btn-account').onclick = function () {
       $('auth-msg').textContent = '';
       openModal('modal-account');
@@ -658,6 +678,7 @@
 
     $('room-game-name').style.cursor = 'pointer';
     $('room-game-name').onclick = pickGameFromRoom;
+    $('btn-change-game').onclick = function () { snd('click'); pickGameFromRoom(); };
 
     $('btn-start').onclick = function () { net.send(3, { e: 'start' }); };
     $('chat-input').addEventListener('keydown', function (ev) {
@@ -686,11 +707,33 @@
       VP.engine.stop();
       net.stopInputs();
       hideResults();
+      hideGameChat();
       if (state.room) net.send(3, { e: 'leave' });
       state.room = null;
       state.lastRoomCode = null;
       show('title');
     };
+    var chatInput = $('game-chat-input');
+    chatInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { chatInput.blur(); return; }
+      if (ev.key === 'Enter') {
+        var text = chatInput.value.trim();
+        if (text) net.send(4, { e: 'chat', t: text });
+        chatInput.value = '';
+        chatInput.blur();
+      }
+      ev.stopPropagation();
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter' || ev.repeat) return;
+      if (state.screen !== 'game' || !state.room) return;
+      if ($('results').classList.contains('hidden') === false) return;
+      var el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ($('game-chat').classList.contains('hidden')) return;
+      chatInput.focus();
+      ev.preventDefault();
+    });
     $('btn-again').onclick = function () {
       hideResults();
       VP.engine.stop();
@@ -790,6 +833,8 @@
           $('conn-status').textContent = 'ONLINE';
           VP.engine.startRemote(msg.game, msg.config, state.myPid);
           net.startInputs(VP.engine.netKeys);
+          $('game-chat').classList.remove('hidden');
+          $('game-chat-input').value = '';
           break;
         case 'ended':
           state.room = msg.room;

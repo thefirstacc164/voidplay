@@ -537,3 +537,53 @@ select option { background: #10101c; }
   .room-side { min-width: 0; }
   .trade-cols { flex-direction: column; }
 }
+
+.game-chat {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: 280px;
+}
+.game-chat input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 255, 242, 0.28);
+  background: rgba(8, 10, 26, 0.72);
+  color: #e8f6ff;
+  font: 600 12px/1.4 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  outline: none;
+}
+.game-chat input:focus {
+  border-color: rgba(0, 255, 242, 0.65);
+  box-shadow: 0 0 14px rgba(0, 255, 242, 0.18);
+}
+.game-chat input::placeholder {
+  color: rgba(232, 246, 255, 0.38);
+}
+
+.btn.small {
+  padding: 6px 14px;
+  font-size: 11px;
+  width: 100%;
+  margin-top: 6px;
+}
+.game-card.picked {
+  border-color: rgba(255, 0, 228, 0.75);
+  box-shadow: 0 0 18px rgba(255, 0, 228, 0.25);
+}
+.gc-picked {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 0, 228, 0.18);
+  border: 1px solid rgba(255, 0, 228, 0.55);
+  color: #ffb3ef;
+  font: 700 9px/1.5 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.08em;
+}
+.game-card { position: relative; }

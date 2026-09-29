@@ -57,6 +57,7 @@
         </div>
         <div class="room-side">
           <div id="room-game-name" class="room-game"></div>
+          <button id="btn-change-game" class="btn ghost small">CHANGE GAME</button>
           <div class="room-chat">
             <div id="chat-log" class="chat-log"></div>
             <div class="chat-row">
@@ -73,6 +74,9 @@
         <button id="btn-game-exit" class="btn ghost tiny">EXIT</button>
         <div id="game-name-label" class="game-name-label"></div>
         <div id="conn-status" class="conn-status"></div>
+      </div>
+      <div id="game-chat" class="game-chat hidden">
+        <input id="game-chat-input" maxlength="120" placeholder="chat, Enter to send" autocomplete="off" />
       </div>
       <div id="results" class="results hidden">
         <div id="results-title" class="results-title"></div>
