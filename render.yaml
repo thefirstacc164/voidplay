@@ -1,0 +1,21 @@
+# VOIDPLAY — Render.com deployment
+# https://render.com — deploy with "New + Blueprint" pointing at this repo.
+#
+# Equivalent manual setup (New + Web Service):
+#   Language:       Node
+#   Root Directory: (leave blank — this file is at the repo root)
+#   Build Command:  npm install
+#   Start Command:  node server/index.js
+#   Instance type:  Free
+#   Env vars:       none required (Render injects PORT; code defaults to 10000)
+
+services:
+  - type: web
+    name: voidplay
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    envVars:
+      - key: PORT
+        value: 10000
