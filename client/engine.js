@@ -25,7 +25,13 @@
     keys2: 0,
     remote: null,
     onChat: null,
+    countdown: 0,
+    cdStage: 0,
   };
+
+  function snd(name) {
+    if (root.VP && root.VP.sound && root.VP.sound[name]) root.VP.sound[name]();
+  }
 
   var scratch = {};
   var anim = { deaths: {}, tiles: {} };
@@ -132,6 +138,8 @@
       E.running = true;
       E.ended = false;
       E.onEnd = onEnd || null;
+      E.countdown = 2400;
+      E.cdStage = 4;
       resetViewCaches();
       lastFrame = performance.now();
       acc = 0;
@@ -321,7 +329,10 @@
   function watchDeaths(players) {
     for (var k in players) {
       var p = players[k];
-      if (prevAlive[k] && !p.al) anim.deaths[k] = performance.now();
+      if (prevAlive[k] && !p.al) {
+        anim.deaths[k] = performance.now();
+        snd('death');
+      }
       prevAlive[k] = p.al;
     }
   }
@@ -365,14 +376,24 @@
     lastFrame = now;
     if (dt > 200) dt = 200;
     if (E.mode === 'local') {
-      acc += dt;
-      var guard = 0;
-      while (acc >= STEP && guard < 6) {
-        stepLocal(STEP);
-        acc -= STEP;
-        guard++;
+      if (E.countdown > 0) {
+        E.countdown -= dt;
+        var stage = Math.ceil(E.countdown / 800);
+        if (stage !== E.cdStage && stage >= 1) {
+          E.cdStage = stage;
+          snd('count');
+        }
+        if (E.countdown <= 0) snd('go');
+      } else {
+        acc += dt;
+        var guard = 0;
+        while (acc >= STEP && guard < 6) {
+          stepLocal(STEP);
+          acc -= STEP;
+          guard++;
+        }
+        if (guard >= 6) acc = 0;
       }
-      if (guard >= 6) acc = 0;
     } else {
       stepRemote(dt);
     }
@@ -543,6 +564,22 @@
     if (E.mode === 'local' && E.twoP) {
       S.text(ctx, 'P1 WASD + SPACE      P2 ARROWS + ENTER', W / 2, H - 14, { size: 11, glow: '#ffffff', blur: 0 });
     }
+    if (E.mode === 'local' && E.countdown > 0) {
+      var n = Math.ceil(E.countdown / 800);
+      if (n >= 1) {
+        ctx.fillStyle = 'rgba(4,4,10,0.45)';
+        ctx.fillRect(0, 0, W, H);
+        S.text(ctx, String(n), W / 2, H / 2, { size: 120, glow: '#00fff2', color: '#ffffff' });
+        S.text(ctx, 'GET READY', W / 2, H / 2 + 90, { size: 16, glow: '#ff0099', color: '#ff0099' });
+      }
+    }
+    if ((E.mode === 'local' && E.countdown <= 0 && view.t < 700) ||
+        (E.mode === 'remote' && view.t < 700)) {
+      var a = 1 - view.t / 700;
+      ctx.globalAlpha = a;
+      S.text(ctx, 'GO!', W / 2, H / 2, { size: 90, glow: '#39ff14', color: '#39ff14' });
+      ctx.globalAlpha = 1;
+    }
     var cut = now - 9000;
     var lines = 0;
     for (var c = chatFade.length - 1; c >= 0; c--) {
@@ -582,10 +619,25 @@
     keysBound = true;
     document.addEventListener('keydown', function (ev) {
       if (editable(ev.target)) return;
+      if (ev.repeat) return;
       var b1 = KEYMAP1[ev.code];
       var b2 = KEYMAP2[ev.code];
-      if (b1) { E.keys1 |= b1; ev.preventDefault(); }
-      if (b2) { E.keys2 |= b2; ev.preventDefault(); }
+      if (b1) {
+        if (E.running && !E.countdown) {
+          if (b1 === 16) snd('jump');
+          else if (b1 === 32) snd('dash');
+        }
+        E.keys1 |= b1;
+        ev.preventDefault();
+      }
+      if (b2) {
+        if (E.running && !E.countdown) {
+          if (b2 === 16) snd('jump');
+          else if (b2 === 32) snd('dash');
+        }
+        E.keys2 |= b2;
+        ev.preventDefault();
+      }
     });
     document.addEventListener('keyup', function (ev) {
       var b1 = KEYMAP1[ev.code];

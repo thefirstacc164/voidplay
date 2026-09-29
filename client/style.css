@@ -275,6 +275,34 @@ select option { background: #10101c; }
 .results-row .rr-pos { font-weight: 900; color: var(--cyan); width: 22px; }
 .results-row.winner { border-color: var(--green); box-shadow: 0 0 18px rgba(57, 255, 20, 0.25); }
 .results-reward { color: var(--green); font-size: 14px; letter-spacing: 0.06em; }
+.confetti-bit {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0.6; }
+}
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.lb-row.me { border-color: var(--cyan); }
+.lb-pos { font-weight: 900; color: var(--cyan); width: 24px; }
+.lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-stats { color: var(--dim); font-size: 11px; }
+.lb-list { display: flex; flex-direction: column; gap: 6px; }
 .results-actions { display: flex; gap: 12px; }
 
 .friend-dock {
@@ -309,6 +337,8 @@ select option { background: #10101c; }
 .friend-empty { font-size: 11px; color: var(--dim); text-align: center; line-height: 1.5; padding: 8px; }
 
 .account-btn { position: fixed; top: 14px; right: 14px; z-index: 40; }
+.mute-btn { position: fixed; top: 14px; right: 118px; z-index: 40; padding: 10px 12px; }
+.mute-btn.off { opacity: 0.5; }
 .coin-chip {
   position: fixed;
   top: 16px;

@@ -237,6 +237,17 @@ function friendDel(conn, rawName) {
   return { e: 'friends', ok: 1, profile: publicProfile(profileOf(conn)) };
 }
 
+function top() {
+  const users = vault.get().users;
+  const list = [];
+  for (const key of Object.keys(users)) {
+    const u = users[key];
+    if (u.stats && u.stats.plays > 0) list.push({ n: u.name, p: u.stats.plays, w: u.stats.wins || 0 });
+  }
+  list.sort((a, b) => (b.w - a.w) || (b.p - a.p));
+  return list.slice(0, 10);
+}
+
 function credit(conn, coins, won) {
   const user = profileOf(conn);
   if (!user) return null;
@@ -264,4 +275,5 @@ module.exports = {
   friendAdd,
   friendDel,
   credit,
+  top,
 };

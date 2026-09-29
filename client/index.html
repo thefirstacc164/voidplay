@@ -92,6 +92,7 @@
     </div>
 
     <button id="btn-account" class="btn ghost account-btn">ACCOUNT</button>
+    <button id="btn-mute" class="btn ghost mute-btn" title="sound on/off">🔊</button>
     <div id="coin-chip" class="coin-chip"><span id="coin-count">0</span> ¢</div>
     <div id="me-chip" class="me-chip"></div>
 
@@ -118,6 +119,7 @@
           <div class="shop-tabs">
             <button class="shop-tab active" data-shop="shape">SHAPES</button>
             <button class="shop-tab" data-shop="trail">TRAILS</button>
+            <button class="shop-tab" data-shop="top">TOP 10</button>
           </div>
           <div id="shop-grid" class="shop-grid"></div>
           <button id="btn-logout" class="btn ghost wide">LOG OUT</button>
@@ -147,7 +149,7 @@
           <button id="btn-mode-online" class="btn primary">MULTIPLAYER<span class="btn-sub">online room</span></button>
         </div>
         <div id="bot-picker" class="bot-picker">
-          <span>BOTS</span>
+          <span>BOTS FOR SOLO / TWO PLAYER</span>
           <button class="bot-opt" data-n="1">1</button>
           <button class="bot-opt" data-n="2">2</button>
           <button class="bot-opt" data-n="3">3</button>
@@ -200,6 +202,7 @@
   <script src="/shared/core.js"></script>
   <script src="/shared/items.js"></script>
   <script src="/client/network.js"></script>
+  <script src="/client/sound.js"></script>
   <script src="/client/engine.js"></script>
   <script src="/client/lobby.js"></script>
 </body>

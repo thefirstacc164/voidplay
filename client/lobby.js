@@ -4,6 +4,8 @@
   var VP = root.VP;
   var net = VP.net;
   var ITEMS = VP.ITEMS;
+  var sound = VP.sound || { muted: function () { return false; } };
+  function snd(name) { if (sound[name]) sound[name](); }
   var $ = function (id) { return document.getElementById(id); };
 
   var RANK_REWARDS = [60, 30, 15, 10];
@@ -26,6 +28,7 @@
     shopTab: 'shape',
     lastResult: null,
     remoteMode: false,
+    lastRoomCode: null,
   };
 
   function lsGet(k, d) {
@@ -40,6 +43,22 @@
   state.wallet = parseInt(lsGet('vp.coins', '0'), 10) || 0;
 
   function saveWallet() { lsSet('vp.coins', String(state.wallet)); }
+
+  function confetti() {
+    var host = document.querySelector('.screen.active') || document.body;
+    var colors = ['#00fff2', '#ff0099', '#39ff14', '#ffd94a', '#ffffff'];
+    for (var i = 0; i < 70; i++) {
+      var bit = document.createElement('div');
+      bit.className = 'confetti-bit';
+      bit.style.left = (Math.random() * 100) + 'vw';
+      bit.style.background = colors[(Math.random() * colors.length) | 0];
+      bit.style.animationDuration = (1.6 + Math.random() * 1.6) + 's';
+      bit.style.animationDelay = (Math.random() * 0.5) + 's';
+      bit.style.transform = 'rotate(' + (Math.random() * 360) + 'deg)';
+      host.appendChild(bit);
+      setTimeout(function (b) { return function () { b.remove(); }; }(bit), 4200);
+    }
+  }
 
   function toast(text, kind, actionLabel, actionFn) {
     var t = document.createElement('div');
@@ -78,7 +97,33 @@
     $('me-chip').textContent = state.authed ? state.name : state.name + ' · guest';
   }
 
-  function setAccountUi() {
+  function renderLeaderboard(list) {
+    var grid = $('shop-grid');
+    grid.innerHTML = '';
+    grid.className = 'lb-list';
+    if (!list || !list.length) {
+      grid.innerHTML = '<div class="friend-empty">nobody has played yet — be the first</div>';
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      var row = document.createElement('div');
+      row.className = 'lb-row' + (state.authed && list[i].n === state.name ? ' me' : '');
+      row.innerHTML = '<span class="lb-pos">' + (i + 1) + '</span>' +
+        '<span class="lb-name">' + escapeHtml(list[i].n) + '</span>' +
+        '<span class="lb-stats">' + list[i].w + ' wins · ' + list[i].p + ' plays</span>';
+      grid.appendChild(row);
+    }
+  }
+
+  function renderShop() {
+    var grid = $('shop-grid');
+    grid.className = 'shop-grid';
+    if (state.shopTab === 'top') {
+      net.send(4, { e: 'top' });
+      grid.innerHTML = '<div class="friend-empty">loading…</div>';
+      return;
+    }
+    if (!state.profile) return;
     var authbox = $('account-auth');
     var panel = $('account-panel');
     if (state.authed) {
@@ -270,13 +315,20 @@
 
   function showResults(result, reward, local) {
     state.lastResult = { result: result, local: local };
+    var iWon = result.w !== null && (result.w === state.myPid || (local && result.w === 1));
+    if (iWon) {
+      snd('win');
+      confetti();
+    } else {
+      snd('lose');
+    }
     var names = {};
     var view = VP.engine.E.mode === 'local' && VP.engine.E.st ? VP.engine.E.st.p : null;
     if (view) for (var k in view) names[k] = view[k].name;
     if (state.room) {
       for (var i = 0; i < state.room.players.length; i++) names[state.room.players[i].i] = state.room.players[i].n;
     }
-    var title = result.w === null ? 'DRAW' : (result.w === state.myPid || (local && result.w === 1) ? 'YOU WIN' : (names[result.w] || 'PLAYER') + ' WINS');
+    var title = result.w === null ? 'DRAW' : (iWon ? 'YOU WIN' : (names[result.w] || 'PLAYER') + ' WINS');
     if (result.w !== null && !local && state.room) {
       var winnerRow = state.room.players.filter(function (p) { return p.i === result.w; })[0];
       if (winnerRow && winnerRow.bot) title = winnerRow.n + ' WINS';
@@ -499,6 +551,30 @@
   }
 
   function bindUi() {
+    var muteBtn = $('btn-mute');
+    function refreshMute() {
+      muteBtn.textContent = sound.muted() ? '🔇' : '🔊';
+      muteBtn.classList.toggle('off', sound.muted());
+    }
+    muteBtn.onclick = function () { sound.toggle(); refreshMute(); };
+    refreshMute();
+
+    document.addEventListener('pointerdown', function () { if (sound.unlock) sound.unlock(); }, { once: true });
+
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      while (t && t !== document.body) {
+        if (t.classList && (t.classList.contains('btn') || t.classList.contains('game-card') ||
+            t.classList.contains('shop-item') || t.classList.contains('bot-opt') ||
+            t.classList.contains('auth-tab') || t.classList.contains('shop-tab') ||
+            t.classList.contains('friend-row') || t.classList.contains('trade-item'))) {
+          snd('click');
+          break;
+        }
+        t = t.parentNode;
+      }
+    });
+
     $('btn-play').onclick = openLibrary;
     $('btn-create').onclick = function () { net.send(3, { e: 'create' }); };
     $('btn-join').onclick = function () {
@@ -546,8 +622,10 @@
     $('btn-mode-online').onclick = function () { startMode('online'); };
 
     $('btn-room-leave').onclick = function () {
+      snd('back');
       net.send(3, { e: 'leave' });
       state.room = null;
+      state.lastRoomCode = null;
       show('title');
     };
     $('btn-bot-add').onclick = function () { net.send(3, { e: 'botadd' }); };
@@ -604,11 +682,13 @@
     };
 
     $('btn-game-exit').onclick = function () {
+      snd('back');
       VP.engine.stop();
       net.stopInputs();
       hideResults();
       if (state.room) net.send(3, { e: 'leave' });
       state.room = null;
+      state.lastRoomCode = null;
       show('title');
     };
     $('btn-again').onclick = function () {
@@ -655,6 +735,7 @@
   }
 
   function onAuthOk(msg) {
+    snd('join');
     state.authed = true;
     state.profile = msg.profile;
     state.name = msg.name;
@@ -682,7 +763,9 @@
       switch (msg.e) {
         case 'created':
         case 'joined':
+          snd('join');
           state.room = msg.room;
+          state.lastRoomCode = msg.room.code;
           state.myPid = msg.you;
           show('room');
           renderRoom();
@@ -697,6 +780,8 @@
           break;
         case 'started':
           state.room = msg.room;
+          state.lastRoomCode = msg.room.code;
+          snd('start');
           show('game');
           hideResults();
           VP.engine.attach($('game-canvas'));
@@ -730,6 +815,7 @@
           toast('trade declined', 'bad');
           break;
         case 'traded':
+          snd('trade');
           toast('trade complete', 'good');
           break;
         default: break;
@@ -771,6 +857,7 @@
           }
           break;
         case 'reward':
+          snd('coin');
           toast('+' + msg.coins + ' coins' + (msg.won ? ' · winner!' : ''), 'good');
           if (state.authed && state.profile) state.profile.coins = msg.total;
           coinDisplay();
@@ -785,7 +872,13 @@
           }
           renderFriends();
           break;
+        case 'top':
+          if (state.shopTab === 'top' && !$('modal-account').classList.contains('hidden')) {
+            renderLeaderboard(msg.list);
+          }
+          break;
         case 'chat':
+          snd('msg');
           chatLine(msg.n, msg.t);
           break;
         case 'invite':
@@ -812,6 +905,11 @@
       $('conn-status').textContent = 'ONLINE';
       if (state.token) net.send(4, { e: 'login', token: state.token });
       sendWatch();
+      if (state.lastRoomCode) {
+        var code = state.lastRoomCode;
+        state.lastRoomCode = null;
+        net.send(3, { e: 'join', code: code });
+      }
     });
     net.on('close', function () {
       $('conn-status').textContent = 'RECONNECTING…';
@@ -820,7 +918,7 @@
         VP.engine.stop();
         net.stopInputs();
         show('title');
-        toast('connection lost — back to the menu', 'bad');
+        toast('connection lost — rejoining your room…', 'bad');
       }
     });
 

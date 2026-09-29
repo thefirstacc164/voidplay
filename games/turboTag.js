@@ -134,8 +134,23 @@
         if (dd < best) { best = dd; target = o; }
       }
       if (Number(k) === st.it) {
-        if (target) {
-          var dx = target.x - p.x, dy = target.y - p.y;
+        var cands = [];
+        for (var q2 in st.p) {
+          var o2 = st.p[q2];
+          if (!o2.al || o2 === p) continue;
+          cands.push({ o: o2, d: S.dist(p.x, p.y, o2.x, o2.y) });
+        }
+        cands.sort(function (a, b) { return a.d - b.d; });
+        var pick = cands.length ? cands[0] : null;
+        if (st.imm > 0) {
+          for (var c = 0; c < cands.length; c++) {
+            if (cands[c].d > 140) { pick = cands[c]; break; }
+          }
+        }
+        if (pick) {
+          var lead = Math.min(1.1, pick.d / 300);
+          var dx = pick.o.x + pick.o.vx * lead - p.x;
+          var dy = pick.o.y + pick.o.vy * lead - p.y;
           var l = Math.hypot(dx, dy) || 1;
           p.aim = { x: dx / l, y: dy / l };
         }
@@ -145,6 +160,13 @@
         p.aim = { x: dx2 / l2, y: dy2 / l2 };
         var mx = p.x + p.aim.x * 70, my = p.y + p.aim.y * 70;
         if (S.dist(mx, my, CX, CY) > R - 40) p.aim = { x: (CX - p.x) / 200, y: (CY - p.y) / 200 };
+        for (var q3 in st.p) {
+          var o3 = st.p[q3];
+          if (!o3.al || o3 === p || Number(q3) === st.it) continue;
+          var sx = p.x - o3.x, sy = p.y - o3.y;
+          var sd = Math.hypot(sx, sy);
+          if (sd > 0.1 && sd < 46) { p.aim.x += sx / sd * 0.7; p.aim.y += sy / sd * 0.7; }
+        }
       } else if (target) {
         var dx3 = target.x - p.x, dy3 = target.y - p.y;
         var l3 = Math.hypot(dx3, dy3) || 1;

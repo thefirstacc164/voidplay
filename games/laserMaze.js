@@ -41,20 +41,33 @@
     return false;
   }
 
-  function safeSpot(i) {
-    var r = S.rng(9871 + i * 7717);
+  function safeSpot(i, r) {
+    var rng = S.rng(9871 + i * 7717);
+    if (r.bot) {
+      var top = r.s % 2 === 1;
+      var left = r.s < 3;
+      var h = [laserPos(220, LASERS[0]), laserPos(220, LASERS[1])].sort(function (a, b) { return a - b; });
+      var v = [laserPos(220, LASERS[2]), laserPos(220, LASERS[3])].sort(function (a, b) { return a - b; });
+      var x = left ? v[0] - 30 : v[1] + 30;
+      var y = top ? h[0] - 30 : h[1] + 30;
+      x = S.clamp(x, 40, W - 40);
+      y = S.clamp(y, 40, H - 40);
+      return { x: x, y: y };
+    }
     for (var tries = 0; tries < 200; tries++) {
-      var x = 60 + r() * (W - 120);
-      var y = 60 + r() * (H - 120);
-      if (!laserHit(0, { x: x, y: y }) && !laserHit(400, { x: x, y: y })) return { x: x, y: y };
+      var x2 = 60 + rng() * (W - 120);
+      var y2 = 60 + rng() * (H - 120);
+      if (!laserHit(0, { x: x2, y: y2 }) && !laserHit(400, { x: x2, y: y2 })) return { x: x2, y: y2 };
     }
     return { x: W / 2, y: H / 2 };
   }
 
   function init(players) {
-    var st = { t: 0, ph: 0, seed: 0, p: {}, scd: 0 };
+    var sd = 0;
+    players.forEach(function (r) { sd = (sd * 31 + r.i * 7 + String(r.n).length * 13) % 99991; });
+    var st = { t: 0, ph: 0, seed: sd, p: {}, scd: 0 };
     players.forEach(function (r, i) {
-      var sp = safeSpot(i);
+      var sp = safeSpot(i, r);
       st.p[String(r.i)] = {
         name: r.n, slot: r.s, sh: r.sh || 'sq', tr: r.tr || 't0', bot: r.bot ? 1 : 0,
         x: sp.x, y: sp.y,
@@ -113,7 +126,7 @@
 
   function getState(st, last) {
     if (!last) {
-      var full = { t: Math.round(st.t), ph: 0, seed: 0, p: {} };
+      var full = { t: Math.round(st.t), ph: 0, seed: st.seed, p: {} };
       for (var k in st.p) full.p[k] = S.pd(st.p[k], null, PF.concat(['name', 'slot', 'sh', 'tr']));
       return full;
     }
@@ -127,30 +140,45 @@
     return d;
   }
 
+  function axisWalls(t, vert) {
+    var walls = [];
+    for (var i = 0; i < LASERS.length; i++) {
+      if (LASERS[i].vert === vert) walls.push(laserPos(t, LASERS[i]));
+    }
+    walls.sort(function (a, b) { return a - b; });
+    return walls;
+  }
+
   function bots(st) {
+    var hP = axisWalls(st.t + 220, false);
+    var vP = axisWalls(st.t + 220, true);
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var ax = 0, ay = 0;
-      for (var i = 0; i < LASERS.length; i++) {
-        var L = LASERS[i];
-        var pos = laserPos(st.t, L);
-        var vel = Math.cos(st.t * L.sp + L.ph) * L.sp * L.amp;
-        var ahead = pos + vel * 520;
-        if (L.vert) {
-          var dx = p.x - ahead;
-          if (Math.abs(dx) < 150) ax += Math.sign(dx || 1) * 1.35 * (1 - Math.abs(dx) / 150);
-        } else {
-          var dy = p.y - ahead;
-          if (Math.abs(dy) < 150) ay += Math.sign(dy || 1) * 1.35 * (1 - Math.abs(dy) / 150);
+      var top = p.slot % 2 === 1;
+      var left = p.slot < 3;
+      var ty = top ? Math.min(hP[0] / 2, hP[0] - 26) : Math.max((hP[1] + H) / 2, hP[1] + 26);
+      var tx = left ? Math.min(vP[0] / 2, vP[0] - 26) : Math.max((vP[1] + W) / 2, vP[1] + 26);
+      var wind = Math.floor(st.t / 650);
+      var hsh = Math.sin(wind * 12.9898 + p.slot * 78.233 + st.seed * 0.371) * 43758.5453;
+      hsh -= Math.floor(hsh);
+      var lapse = hsh < 0.042 + (p.slot % 3) * 0.014;
+      if (lapse) { tx = p.x; ty = p.y; }
+      var ax = S.clamp((tx - p.x) * 3.4, -250, 250);
+      var ay = S.clamp((ty - p.y) * 3.4, -250, 250);
+      if (!lapse) {
+        for (var i = 0; i < LASERS.length; i++) {
+          var L = LASERS[i];
+          var pos = laserPos(st.t + 120, L);
+          if (L.vert) {
+            var dx = p.x - pos;
+            if (Math.abs(dx) < 48) ax += (dx >= 0 ? 1 : -1) * (1 - Math.abs(dx) / 48) * 300;
+          } else {
+            var dy = p.y - pos;
+            if (Math.abs(dy) < 48) ay += (dy >= 0 ? 1 : -1) * (1 - Math.abs(dy) / 48) * 300;
+          }
         }
       }
-      ax += (W / 2 - p.x) / 900 + Math.sin(st.t / 650 + p.slot * 2.3) * 0.4;
-      ay += (H / 2 - p.y) / 700 + Math.cos(st.t / 830 + p.slot * 1.7) * 0.4;
-      if (p.x < 80) ax += 0.7;
-      if (p.x > W - 80) ax -= 0.7;
-      if (p.y < 80) ay += 0.7;
-      if (p.y > H - 80) ay -= 0.7;
       var l = Math.hypot(ax, ay);
       if (l > 0.05) p.aim = { x: ax / l, y: ay / l };
       else p.aim = null;

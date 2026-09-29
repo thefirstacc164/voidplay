@@ -172,6 +172,7 @@ function handleSocial(conn, p) {
     case 'claim': net.send(conn.ws, net.MSG.SOCIAL, accounts.claim(conn, p.c)); break;
     case 'fadd': net.send(conn.ws, net.MSG.SOCIAL, accounts.friendAdd(conn, p.n)); break;
     case 'fdel': net.send(conn.ws, net.MSG.SOCIAL, accounts.friendDel(conn, p.n)); break;
+    case 'top': net.send(conn.ws, net.MSG.SOCIAL, { e: 'top', list: accounts.top() }); break;
     case 'invite': rooms.invite(conn, p.to, p.g); break;
     case 'chat': rooms.chat(conn, p.t); break;
     case 'watch': rooms.watch(conn, p.f); break;

@@ -132,26 +132,45 @@
       var ax = 0, ay = 0;
       var dx = p.x - CX, dy = p.y - CY;
       var r = Math.hypot(dx, dy) || 1;
-      if (r > 235) { ax -= dx / r; ay -= dy / r; }
-      if (r < 90) { ax += dx / r; ay += dy / r; }
-
       var theta = Math.atan2(dy, dx);
-      for (var i = 0; i < BEAMS; i++) {
-        var a = beamAngle(st.t, i);
-        if (Math.abs(Math.sin(theta - a)) * r < 130) {
-          var tang = theta + Math.PI / 2;
-          ax += Math.cos(tang) * 1.2;
-          ay += Math.sin(tang) * 1.2;
+
+      var angs = [];
+      for (var i = 0; i < BEAMS; i++) angs.push(beamAngle(st.t, i));
+      angs.sort(function (a, b) { return a - b; });
+      var want = angs[0] + Math.PI / 6, bestD = 1e9;
+      for (var g = 0; g < BEAMS * 2; g++) {
+        var cand = angs[0] + Math.PI / 6 + g * Math.PI / BEAMS;
+        var cd = Math.abs(((cand - theta + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        if (cd < bestD) { bestD = cd; want = cand; }
+      }
+      var diff = ((want - theta + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      var om = (beamAngle(st.t + 16, 0) - beamAngle(st.t, 0)) / 16;
+      var vt = om * r + diff * 170;
+      if (vt > 265) vt = 265;
+      if (vt < -265) vt = -265;
+      var vr = (85 - r) * 4;
+      if (vr > 130) vr = 130;
+      if (vr < -130) vr = -130;
+      ax += -Math.sin(theta) * vt + Math.cos(theta) * vr;
+      ay += Math.cos(theta) * vt + Math.sin(theta) * vr;
+
+      for (var i2 = 0; i2 < BEAMS; i2++) {
+        var a2 = beamAngle(st.t, i2);
+        var sd = Math.sin(theta - a2);
+        if (Math.abs(sd) * r < 40) {
+          var side = sd >= 0 ? 1 : -1;
+          ax += -Math.sin(a2) * 1.6 * side;
+          ay += Math.cos(a2) * 1.6 * side;
         }
       }
       for (var j = 0; j < ORBITS.length; j++) {
-        var o = planetPos(st.t, ORBITS[j]);
+        var o = planetPos(st.t + 400, ORBITS[j]);
         var pdx = p.x - o.x, pdy = p.y - o.y;
         var pd = Math.hypot(pdx, pdy) || 1;
-        if (pd < 90) { ax += pdx / pd * (1 - pd / 90); ay += pdy / pd * (1 - pd / 90); }
+        if (pd < 110) { ax += pdx / pd * (1 - pd / 110) * 1.4; ay += pdy / pd * (1 - pd / 110) * 1.4; }
       }
-      ax += Math.sin(st.t / 700 + p.slot * 2.9) * 0.45;
-      ay += Math.cos(st.t / 870 + p.slot * 1.3) * 0.45;
+      ax += Math.sin(st.t / 900 + p.slot * 2.9) * 0.08;
+      ay += Math.cos(st.t / 1100 + p.slot * 1.3) * 0.08;
       var l = Math.hypot(ax, ay);
       if (l > 0.05) p.aim = { x: ax / l, y: ay / l };
       else p.aim = { x: -dy / r, y: dx / r };

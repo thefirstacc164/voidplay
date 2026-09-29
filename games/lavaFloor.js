@@ -118,7 +118,25 @@
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
       var danger = p.y > ly - 200;
-      if (!p.ground) continue;
+      if (!p.ground) {
+        var tgt = null;
+        if (p.vy < 0 && p.mem.jx !== undefined) {
+          tgt = p.mem.jx;
+        } else {
+          var bd = 1e9, bx = 0;
+          for (var i = 0; i < list.length; i++) {
+            var pl = list[i];
+            if (pl.y <= p.y + 4 || pl.y > ly - 30) continue;
+            var near2 = S.clamp(p.x, pl.x + 14, pl.x + pl.w - 14);
+            var d2 = (pl.y - p.y) + Math.abs(near2 - p.x) * 1.2;
+            if (d2 < bd) { bd = d2; bx = near2; }
+          }
+          if (bd < 1e9) tgt = bx;
+        }
+        if (tgt !== null) p.aim = { x: S.clamp((tgt - p.x) / 30, -1, 1), y: 0 };
+        continue;
+      }
+      p.mem.jx = undefined;
       var above = null, best = 1e9;
       for (var i = 0; i < list.length; i++) {
         var pl = list[i];
@@ -133,7 +151,10 @@
       if (above) {
         var dx2 = above.near - p.x;
         p.aim = { x: S.clamp(dx2 / 40, -1, 1), y: 0 };
-        if (Math.abs(dx2) < 24 && above.dy <= 150 && Math.abs(p.vx) < 150 && Math.random() < (danger ? 0.7 : 0.45)) p.tp |= 16;
+        if (Math.abs(dx2) < 40 && above.dy <= 165 && Math.abs(p.vx) < 160 && Math.random() < (danger ? 0.75 : 0.5)) {
+          p.tp |= 16;
+          p.mem.jx = above.near;
+        }
       } else {
         p.aim = { x: Math.sin(st.t / 600 + p.slot * 2) * 0.6, y: 0 };
         if (Math.random() < 0.015) p.tp |= 16;
