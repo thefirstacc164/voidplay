@@ -56,7 +56,7 @@ loadDir(GAMES_DIR, '/games/');
 let opsBundle = null;
 try { opsBundle = fs.readFileSync(path.join(ROOT, 'private', 'ops.js')); } catch (err) {}
 const opsKeyHash = process.env.PSWRD_PSWRD
-  ? crypto.createHash('sha256').update(String(process.env.PSWRD_PSWRD)).digest()
+  ? crypto.createHash('sha256').update(String(process.env.PSWRD_PSWRD).trim()).digest()
   : null;
 const opsFails = new Map();
 const OPS_MAX_FAILS = 5;
@@ -94,7 +94,7 @@ async function handleOps(req, res, ip) {
   if (!raw) return notFound(res);
   let key = null;
   try { key = JSON.parse(raw.toString('utf8')).k; } catch (err) { key = null; }
-  const hash = key ? crypto.createHash('sha256').update(String(key)).digest() : null;
+  const hash = key ? crypto.createHash('sha256').update(String(key).trim()).digest() : null;
   const ok = hash && hash.length === opsKeyHash.length &&
     crypto.timingSafeEqual(hash, opsKeyHash);
   if (!ok) {

