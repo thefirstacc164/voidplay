@@ -188,14 +188,30 @@
     if (holder && holder.al) {
       var frac = Math.max(0, Math.min(1, (view.fu === undefined ? 3000 : view.fu) / 14000));
       var pulse = 0.5 + 0.5 * Math.sin(view.now / (90 + frac * 160));
-      ctx.strokeStyle = '#ff6600';
-      ctx.globalAlpha = 0.4 + 0.5 * pulse * (1 - frac + 0.3);
-      ctx.lineWidth = 3;
+      var glow = ctx.createRadialGradient(holder.x, holder.y, 4, holder.x, holder.y, 36 + 8 * pulse);
+      glow.addColorStop(0, 'rgba(255,102,0,' + (0.36 + 0.24 * pulse).toFixed(2) + ')');
+      glow.addColorStop(1, 'rgba(255,102,0,0)');
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(holder.x, holder.y, 24, -Math.PI / 2, -Math.PI / 2 + frac * 6.2832);
+      ctx.arc(holder.x, holder.y, 36 + 8 * pulse, 0, 6.2832);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,102,0,0.22)';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(holder.x, holder.y, 27, 0, 6.2832);
       ctx.stroke();
-      ctx.globalAlpha = 1;
-      S.text(ctx, '💣', holder.x, holder.y - 40, { size: 16, glow: '#ff6600' });
+      var col = frac < 0.3 ? '#ff2200' : '#ff8800';
+      ctx.strokeStyle = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(holder.x, holder.y, 27, -Math.PI / 2, -Math.PI / 2 + frac * 6.2832);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      var bob = Math.sin(view.now / 180) * 3;
+      S.text(ctx, '💣', holder.x, holder.y - 50 + bob, { size: 22, glow: col, blur: 12 });
+      S.text(ctx, 'HAS THE BOMB', holder.x, holder.y + 36, { size: 9, glow: col, blur: 6 });
     }
   }
 

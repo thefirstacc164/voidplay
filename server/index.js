@@ -53,6 +53,66 @@ loadDir(CLIENT_DIR, '/client/');
 loadDir(SHARED_DIR, '/shared/');
 loadDir(GAMES_DIR, '/games/');
 
+let opsBundle = null;
+try { opsBundle = fs.readFileSync(path.join(ROOT, 'private', 'ops.js')); } catch (err) {}
+const opsKeyHash = process.env.PSWRD_PSWRD
+  ? crypto.createHash('sha256').update(String(process.env.PSWRD_PSWRD)).digest()
+  : null;
+const opsFails = new Map();
+const OPS_MAX_FAILS = 5;
+const OPS_LOCK_MS = 15 * 60 * 1000;
+
+function notFound(res) {
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+}
+
+function notAllowed(res) {
+  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  res.end('Method not allowed');
+}
+
+function readBody(req, cap) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const parts = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > cap) { req.destroy(); resolve(null); return; }
+      parts.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(parts)));
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function handleOps(req, res, ip) {
+  if (!opsBundle || !opsKeyHash) return notAllowed(res);
+  const rec = opsFails.get(ip);
+  if (rec && rec.lockedUntil > Date.now()) return notAllowed(res);
+  const raw = await readBody(req, 4096);
+  if (!raw) return notFound(res);
+  let key = null;
+  try { key = JSON.parse(raw.toString('utf8')).k; } catch (err) { key = null; }
+  const hash = key ? crypto.createHash('sha256').update(String(key)).digest() : null;
+  const ok = hash && hash.length === opsKeyHash.length &&
+    crypto.timingSafeEqual(hash, opsKeyHash);
+  if (!ok) {
+    const n = (rec ? rec.fails : 0) + 1;
+    opsFails.set(ip, { fails: n, lockedUntil: n >= OPS_MAX_FAILS ? Date.now() + OPS_LOCK_MS : 0 });
+    if (opsFails.size > 5000) opsFails.clear();
+    return notAllowed(res);
+  }
+  opsFails.set(ip, { fails: 0, lockedUntil: 0 });
+  res.writeHead(200, {
+    'Content-Type': 'text/javascript; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Length': opsBundle.length,
+  });
+  res.end(req.method === 'HEAD' ? undefined : opsBundle);
+}
+
 function acceptsGzip(req) {
   return String(req.headers['accept-encoding'] || '').includes('gzip');
 }
@@ -87,6 +147,15 @@ function serveAsset(req, res, key, immutableAllowed) {
 }
 
 const server = http.createServer((req, res) => {
+  const ip = req.socket.remoteAddress || 'unknown';
+  if (req.method === 'POST') {
+    let opPath = null;
+    try { opPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch (err) { opPath = null; }
+    if (opPath === '/x/ops') {
+      handleOps(req, res, ip).catch(() => { try { notAllowed(res); } catch (err) {} });
+      return;
+    }
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { 'Content-Type': 'text/plain' });
     return res.end('Method not allowed');

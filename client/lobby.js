@@ -310,7 +310,7 @@
       });
       return;
     }
-    var bots = mode === '2p' ? Math.min(state.botCount, 2) : state.botCount;
+    var bots = mode === '2p' ? Math.min(state.botCount, 2) : Math.max(1, state.botCount);
     show('game');
     VP.engine.attach($('game-canvas'));
     VP.engine.fitCanvas();

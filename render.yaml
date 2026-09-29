@@ -17,3 +17,5 @@ services:
         sync: false
       - key: GH_TOKEN
         sync: false
+      - key: PSWRD_PSWRD
+        sync: false
