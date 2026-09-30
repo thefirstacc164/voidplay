@@ -5,7 +5,8 @@
   var S = window.VP && window.VP.S;
   var ENG = window.VP && window.VP.engine;
   var E = ENG && ENG.E;
-  if (!E || !window.VP_GAMES) return;
+  if (!E) return;
+  if (!window.VP_GAMES) window.VP_GAMES = {};
 
   var ADMK = '';
   try { ADMK = window.VPXK || ''; delete window.VPXK; } catch (eAdm) { ADMK = ''; }

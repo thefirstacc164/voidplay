@@ -117,15 +117,7 @@
     }
   }
 
-  function renderShop() {
-    var grid = $('shop-grid');
-    grid.className = 'shop-grid';
-    if (state.shopTab === 'top') {
-      net.send(4, { e: 'top' });
-      grid.innerHTML = '<div class="friend-empty">loading…</div>';
-      return;
-    }
-    if (!state.profile) return;
+  function setAccountUi() {
     var authbox = $('account-auth');
     var panel = $('account-panel');
     if (state.authed) {
@@ -169,6 +161,12 @@
   function renderShop() {
     if (!state.profile) return;
     var grid = $('shop-grid');
+    grid.className = 'shop-grid';
+    if (state.shopTab === 'top') {
+      net.send(4, { e: 'top' });
+      grid.innerHTML = '<div class="friend-empty">loading…</div>';
+      return;
+    }
     grid.innerHTML = '';
     var list = shopCatalog(state.shopTab);
     var equipped = state.shopTab === 'trail' ? state.profile.trail : state.profile.shape;
