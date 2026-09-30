@@ -8,10 +8,13 @@
   if (!E) return;
   if (!window.VP_GAMES) window.VP_GAMES = {};
 
+  var VER = '1.1.0';
+  try { console.log('[ops] v' + VER + ' loaded'); } catch (eV) {}
+
   var ADMK = '';
   try { ADMK = window.VPXK || ''; delete window.VPXK; } catch (eAdm) { ADMK = ''; }
 
-  var OPS = { open: false, god: false, freeze: false, turbo: false, auto: false, forceWin: false, act: {}, aids: {}, srv: { god: false, turbo: false, auto: false, freeze: false, act: {} } };
+  var OPS = { open: false, god: false, freeze: false, turbo: false, auto: false, aiSkill: 7, forceWin: false, act: {}, aids: {}, srv: { god: false, turbo: false, auto: false, freeze: false, skill: 7, act: {} } };
 
   function isRemote() { return E.mode === 'remote'; }
 
@@ -32,6 +35,15 @@
     if (isRemote()) { OPS.srv.auto = v; srvSend({ auto: v }); }
     else OPS.auto = v;
     return v;
+  }
+  function setSkill(v) {
+    v = Math.max(1, Math.min(10, Math.round(v)));
+    if (isRemote()) { OPS.srv.skill = v; srvSend({ skill: v }); }
+    else OPS.aiSkill = v;
+    return v;
+  }
+  function getSkill() {
+    return isRemote() ? (OPS.srv.skill || 7) : (OPS.aiSkill || 7);
   }
   function setTurbo(v) {
     v = !!v;
@@ -59,12 +71,14 @@
       if (rgid && GAME_ASSISTS[rgid]) {
         for (var j = 0; j < GAME_ASSISTS[rgid].length; j++) { ract[GAME_ASSISTS[rgid][j].id] = true; OPS.srv.act[GAME_ASSISTS[rgid][j].id] = true; }
       }
-      srvSend({ god: true, turbo: true, auto: true }, ract);
+      OPS.srv.skill = 10;
+      srvSend({ god: true, turbo: true, auto: true, skill: 10 }, ract);
       return;
     }
     OPS.god = true;
     OPS.turbo = true;
     OPS.auto = true;
+    OPS.aiSkill = 10;
     var gid = E.gameId;
     if (gid && GAME_ASSISTS[gid]) {
       for (var i = 0; i < GAME_ASSISTS[gid].length; i++) OPS.act[GAME_ASSISTS[gid][i].id] = true;
@@ -92,6 +106,7 @@
       OPS.srv.turbo = !!msg.st.turbo;
       OPS.srv.auto = !!msg.st.auto;
       OPS.srv.freeze = !!msg.st.freeze;
+      if (msg.st.skill) OPS.srv.skill = msg.st.skill;
       var ackAct = msg.st.act || {};
       for (var ak in ackAct) OPS.srv.act[ak] = !!ackAct[ak];
       refreshToggles();
@@ -528,7 +543,7 @@
       if (OPS.auto && mine.length) {
         for (var m = 0; m < mine.length; m++) {
           var mp = st.p[String(mine[m])];
-          if (mp && mp.al && !mp.bot) { mp.bot = 1; unbot.push(mp); }
+          if (mp && mp.al && !mp.bot) { mp.bot = 1; mp.skill = getSkill(); unbot.push(mp); }
         }
       }
       if (OPS.freeze) {
@@ -1004,6 +1019,42 @@
     return row;
   }
 
+  function skillRow() {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 12px;';
+    var left = document.createElement('div');
+    var sp = document.createElement('span');
+    sp.textContent = 'AI skill';
+    sp.style.cssText = 'font:600 12px/1.4 system-ui,sans-serif;color:#e8f6ff;letter-spacing:0.03em;display:block;';
+    var dd = document.createElement('span');
+    dd.textContent = '1 rookie \u2014 10 pro';
+    dd.style.cssText = 'font:500 9.5px/1.4 system-ui,sans-serif;color:rgba(232,246,255,0.42);display:block;';
+    left.appendChild(sp);
+    left.appendChild(dd);
+    var ctl = document.createElement('div');
+    ctl.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    function mkBtn(txt, fn) {
+      var b = document.createElement('span');
+      b.textContent = txt;
+      b.style.cssText = 'width:22px;height:22px;border-radius:6px;border:1px solid rgba(0,255,242,0.4);color:#00fff2;font:700 13px/20px system-ui,sans-serif;text-align:center;cursor:pointer;user-select:none;';
+      b.onclick = function (e) { e.stopPropagation(); fn(); };
+      return b;
+    }
+    var minus = mkBtn('\u2212', function () { setSkill(getSkill() - 1); paint(); });
+    var val = document.createElement('span');
+    val.style.cssText = 'min-width:20px;text-align:center;font:700 13px/1.4 system-ui,sans-serif;color:#00fff2;';
+    var plus = mkBtn('+', function () { setSkill(getSkill() + 1); paint(); });
+    ctl.appendChild(minus);
+    ctl.appendChild(val);
+    ctl.appendChild(plus);
+    row.appendChild(left);
+    row.appendChild(ctl);
+    function paint() { val.textContent = getSkill(); }
+    row._paint = paint;
+    paint();
+    return row;
+  }
+
   function buildPanel() {
     if (!window.document || !document.body) return;
     panel = document.createElement('div');
@@ -1013,6 +1064,10 @@
     var ht = document.createElement('div');
     ht.textContent = 'VOIDPLAY OPS';
     ht.style.cssText = 'font:800 13px/1.4 system-ui,sans-serif;letter-spacing:0.24em;color:#00fff2;';
+    var hv = document.createElement('span');
+    hv.textContent = '  v' + VER;
+    hv.style.cssText = 'font:600 10px/1.4 system-ui,sans-serif;letter-spacing:0.08em;color:rgba(0,255,242,0.55);';
+    ht.appendChild(hv);
     var x = document.createElement('div');
     x.textContent = '\u00d7';
     x.style.cssText = 'cursor:pointer;color:rgba(232,246,255,0.6);font:700 16px/1 system-ui,sans-serif;padding:0 4px;';
@@ -1033,7 +1088,8 @@
     }));
     panel.appendChild(toggleRow('god mode', function () { return isRemote() ? OPS.srv.god : OPS.god; }, setGod, 'cannot die, auto-revive'));
     panel.appendChild(toggleRow('freeze bots', function () { return isRemote() ? OPS.srv.freeze : OPS.freeze; }, setFreeze, 'every bot stands still'));
-    panel.appendChild(toggleRow('auto play', function () { return isRemote() ? OPS.srv.auto : OPS.auto; }, setAuto, 'a bot plays for you'));
+    panel.appendChild(toggleRow('AI play', function () { return isRemote() ? OPS.srv.auto : OPS.auto; }, setAuto, 'a smart bot plays for you'));
+    panel.appendChild(skillRow());
     panel.appendChild(toggleRow('turbo', function () { return isRemote() ? OPS.srv.turbo : OPS.turbo; }, setTurbo, '+speed while you hold a direction'));
     panel.appendChild(actionRow('INSTANT WIN', instantWin));
 
@@ -1043,7 +1099,7 @@
     panel.appendChild(gameBox);
 
     var foot = document.createElement('div');
-    foot.textContent = 'F9 panel \u00b7 solo / 2p run here \u00b7 online rooms run on the server';
+    foot.textContent = 'v' + VER + ' \u00b7 AI plays with you \u00b7 solo / 2p here \u00b7 online on the server';
     foot.style.cssText = 'padding:8px 12px 10px;font:600 9px/1.5 system-ui,sans-serif;color:rgba(232,246,255,0.35);letter-spacing:0.04em;';
     panel.appendChild(foot);
     panel.style.display = 'none';
@@ -1091,6 +1147,7 @@
   function tickStatus() {
     if (!statusLine) return;
     var bits = [];
+    bits.push('v' + VER);
     bits.push(E.gameId ? E.gameId : 'idle');
     bits.push(E.mode === 'local' ? (E.twoP ? 'local 2p' : 'local') : E.mode === 'remote' ? 'online' : 'menu');
     if (E.st && E.st.p) bits.push(Object.keys(E.st.p).length + ' players');
@@ -1099,7 +1156,7 @@
     var bFreeze = isRemote() ? OPS.srv.freeze : OPS.freeze;
     var bTurbo = isRemote() ? OPS.srv.turbo : OPS.turbo;
     if (bGod) bits.push('GOD');
-    if (bAuto) bits.push('AUTO');
+    if (bAuto) bits.push('AI ' + getSkill());
     if (bFreeze) bits.push('FROZEN');
     if (bTurbo) bits.push('TURBO');
     statusLine.textContent = bits.join(' \u00b7 ');
@@ -1129,6 +1186,7 @@
   }
 
   window.VPX = {
+    ver: VER,
     panel: function (v) {
       if (v === undefined) v = !OPS.open;
       OPS.open = !!v;
@@ -1139,6 +1197,7 @@
     freeze: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.freeze : OPS.freeze); return setFreeze(v); },
     turbo: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.turbo : OPS.turbo); return setTurbo(v); },
     auto: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.auto : OPS.auto); return setAuto(v); },
+    aiSkill: function (v) { if (v === undefined) return getSkill(); return setSkill(v); },
     win: instantWin,
     aid: function (v) {
       if (!E.gameId || !AIDS[E.gameId]) return false;
@@ -1151,7 +1210,7 @@
       return setAct(id, v);
     },
     info: function () {
-      return { game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, auto: OPS.auto, act: OPS.act, aids: OPS.aids, srv: OPS.srv, adm: !!ADMK };
+      return { ver: VER, game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, auto: OPS.auto, aiSkill: getSkill(), act: OPS.act, aids: OPS.aids, srv: OPS.srv, adm: !!ADMK };
     },
     _h: hook
   };

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['snakePit'])
+    || require('./snakePit.ai.js');
   var COLS = 32, ROWS = 24, CELL = 25;
   var STEP_MS = 110, ORBS = 6, START_LEN = 4;
   var SPAWNS = [[6, 6, 3], [25, 6, 1], [6, 17, 3], [25, 17, 1]];
@@ -200,47 +202,21 @@
     return d;
   }
 
-  function bots(st) {
-    var orbs = orbCells(st);
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var head = p.body[0];
-      var hx = head % COLS, hy = (head / COLS) | 0;
-      var target = -1, best = 1e9;
-      for (var oid in st.en) {
-        var g = st.en[oid].g;
-        var dd = Math.abs(g % COLS - hx) + Math.abs(((g / COLS) | 0) - hy);
-        if (dd < best) { best = dd; target = g; }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var choice = -1, choiceScore = -1e9;
-      for (var dir = 0; dir < 4; dir++) {
-        if (p.d === 0 && dir === 1) continue;
-        if (p.d === 1 && dir === 0) continue;
-        if (p.d === 2 && dir === 3) continue;
-        if (p.d === 3 && dir === 2) continue;
-        var nx = hx + S.DIRX[dir], ny = hy + S.DIRY[dir];
-        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-        var g2 = ny * COLS + nx;
-        if (st.occ[g2] && !orbs[g2]) continue;
-        var score = 0;
-        if (target >= 0) score -= Math.abs(target % COLS - nx) + Math.abs(((target / COLS) | 0) - ny);
-        if (nx === 0 || ny === 0 || nx === COLS - 1 || ny === ROWS - 1) score -= 5;
-        var look = 1;
-        while (true) {
-          var lx = nx + S.DIRX[dir] * look, ly = ny + S.DIRY[dir] * look;
-          if (lx < 0 || ly < 0 || lx >= COLS || ly >= ROWS) { score -= 8; break; }
-          if (st.occ[ly * COLS + lx] && !orbs[ly * COLS + lx]) { score -= 3 / look; break; }
-          if (++look > 6) break;
-        }
-        score += Math.random() * 1.2;
-        if (score > choiceScore) { choiceScore = score; choice = dir; }
-      }
-      if (choice >= 0) {
-        var bits = [1, 2, 4, 8][choice];
-        if (!(p.k & bits)) p.tp |= bits;
-        p.k = (p.k & ~15) | bits;
-      }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

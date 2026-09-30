@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['orbitDodge'])
+    || require('./orbitDodge.ai.js');
   var CX = 400, CY = 300, R = 280;
   var BEAMS = 3, BEAM_W = 15;
   var ORBITS = [
@@ -125,55 +127,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var ax = 0, ay = 0;
-      var dx = p.x - CX, dy = p.y - CY;
-      var r = Math.hypot(dx, dy) || 1;
-      var theta = Math.atan2(dy, dx);
-
-      var angs = [];
-      for (var i = 0; i < BEAMS; i++) angs.push(beamAngle(st.t, i));
-      angs.sort(function (a, b) { return a - b; });
-      var want = angs[0] + Math.PI / 6, bestD = 1e9;
-      for (var g = 0; g < BEAMS * 2; g++) {
-        var cand = angs[0] + Math.PI / 6 + g * Math.PI / BEAMS;
-        var cd = Math.abs(((cand - theta + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-        if (cd < bestD) { bestD = cd; want = cand; }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var diff = ((want - theta + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      var om = (beamAngle(st.t + 16, 0) - beamAngle(st.t, 0)) / 16;
-      var vt = om * r + diff * 170;
-      if (vt > 265) vt = 265;
-      if (vt < -265) vt = -265;
-      var vr = (85 - r) * 4;
-      if (vr > 130) vr = 130;
-      if (vr < -130) vr = -130;
-      ax += -Math.sin(theta) * vt + Math.cos(theta) * vr;
-      ay += Math.cos(theta) * vt + Math.sin(theta) * vr;
-
-      for (var i2 = 0; i2 < BEAMS; i2++) {
-        var a2 = beamAngle(st.t, i2);
-        var sd = Math.sin(theta - a2);
-        if (Math.abs(sd) * r < 40) {
-          var side = sd >= 0 ? 1 : -1;
-          ax += -Math.sin(a2) * 1.6 * side;
-          ay += Math.cos(a2) * 1.6 * side;
-        }
-      }
-      for (var j = 0; j < ORBITS.length; j++) {
-        var o = planetPos(st.t + 400, ORBITS[j]);
-        var pdx = p.x - o.x, pdy = p.y - o.y;
-        var pd = Math.hypot(pdx, pdy) || 1;
-        if (pd < 110) { ax += pdx / pd * (1 - pd / 110) * 1.4; ay += pdy / pd * (1 - pd / 110) * 1.4; }
-      }
-      ax += Math.sin(st.t / 900 + p.slot * 2.9) * 0.08;
-      ay += Math.cos(st.t / 1100 + p.slot * 1.3) * 0.08;
-      var l = Math.hypot(ax, ay);
-      if (l > 0.05) p.aim = { x: ax / l, y: ay / l };
-      else p.aim = { x: -dy / r, y: dx / r };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { beamAngle: beamAngle, planetPos: planetPos, ORBITS: ORBITS });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['laserMaze'])
+    || require('./laserMaze.ai.js');
   var W = 800, H = 600;
   var LASERS = [
     { vert: false, amp: 250, sp: 0.00034, ph: 0.0 },
@@ -149,39 +151,21 @@
     return walls;
   }
 
-  function bots(st) {
-    var hP = axisWalls(st.t + 220, false);
-    var vP = axisWalls(st.t + 220, true);
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var top = p.slot % 2 === 1;
-      var left = p.slot < 3;
-      var ty = top ? Math.min(hP[0] / 2, hP[0] - 26) : Math.max((hP[1] + H) / 2, hP[1] + 26);
-      var tx = left ? Math.min(vP[0] / 2, vP[0] - 26) : Math.max((vP[1] + W) / 2, vP[1] + 26);
-      var wind = Math.floor(st.t / 650);
-      var hsh = Math.sin(wind * 12.9898 + p.slot * 78.233 + st.seed * 0.371) * 43758.5453;
-      hsh -= Math.floor(hsh);
-      var lapse = hsh < 0.042 + (p.slot % 3) * 0.014;
-      if (lapse) { tx = p.x; ty = p.y; }
-      var ax = S.clamp((tx - p.x) * 3.4, -250, 250);
-      var ay = S.clamp((ty - p.y) * 3.4, -250, 250);
-      if (!lapse) {
-        for (var i = 0; i < LASERS.length; i++) {
-          var L = LASERS[i];
-          var pos = laserPos(st.t + 120, L);
-          if (L.vert) {
-            var dx = p.x - pos;
-            if (Math.abs(dx) < 48) ax += (dx >= 0 ? 1 : -1) * (1 - Math.abs(dx) / 48) * 300;
-          } else {
-            var dy = p.y - pos;
-            if (Math.abs(dy) < 48) ay += (dy >= 0 ? 1 : -1) * (1 - Math.abs(dy) / 48) * 300;
-          }
-        }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var l = Math.hypot(ax, ay);
-      if (l > 0.05) p.aim = { x: ax / l, y: ay / l };
-      else p.aim = null;
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { axisWalls: axisWalls, laserPos: laserPos, LASERS: LASERS });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

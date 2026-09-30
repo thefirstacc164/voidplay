@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['lavaFloor'])
+    || require('./lavaFloor.ai.js');
   var W = 800, H = 1500, ROWS = 13, GAP = 104;
   var PHYS = { grav: 1400, jump: 620, speed: 300, friction: 6, r: 12, w: W };
   var BASE = 1560;
@@ -111,64 +113,21 @@
     return d;
   }
 
-  function bots(st) {
-    var list = plats(st);
-    var ly = lavaY(st.t);
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var danger = p.y > ly - 200;
-      if (!p.ground) {
-        var tgt = null;
-        if (p.vy < 0 && p.mem.jx !== undefined) {
-          tgt = p.mem.jx;
-        } else {
-          var bd = 1e9, bx = 0;
-          for (var i = 0; i < list.length; i++) {
-            var pl = list[i];
-            if (pl.y <= p.y + 4 || pl.y > ly - 30) continue;
-            var near2 = S.clamp(p.x, pl.x + 14, pl.x + pl.w - 14);
-            var d2 = (pl.y - p.y) + Math.abs(near2 - p.x) * 1.2;
-            if (d2 < bd) { bd = d2; bx = near2; }
-          }
-          if (bd < 1e9) tgt = bx;
-        }
-        if (tgt !== null) p.aim = { x: S.clamp((tgt - p.x) / 30, -1, 1), y: 0 };
-        continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      p.mem.jx = undefined;
-      var above = null, best = 1e9;
-      for (var i = 0; i < list.length; i++) {
-        var pl = list[i];
-        if (pl.y >= p.y - 10) continue;
-        var dy = p.y - pl.y;
-        if (dy > 160) continue;
-        var near = S.clamp(p.x, pl.x + 14, pl.x + pl.w - 14);
-        var dx = near - p.x;
-        var score = Math.abs(dx) * 0.9 + dy * 0.5 + Math.random() * 26 - (danger ? 40 : 0);
-        if (score < best) { best = score; above = { near: near, dy: dy }; }
-      }
-      if (above) {
-        var dx2 = above.near - p.x;
-        p.aim = { x: S.clamp(dx2 / 40, -1, 1), y: 0 };
-        if (Math.abs(dx2) < 40 && above.dy <= 165 && Math.abs(p.vx) < 160 && Math.random() < (danger ? 0.75 : 0.5)) {
-          p.tp |= 16;
-          p.mem.jx = above.near;
-        }
-      } else {
-        p.aim = { x: Math.sin(st.t / 600 + p.slot * 2) * 0.6, y: 0 };
-        if (Math.random() < 0.015) p.tp |= 16;
-      }
-      var cur = null;
-      for (var ci = 0; ci < list.length; ci++) {
-        var cp = list[ci];
-        if (Math.abs(p.y - cp.y) < 7 && p.x > cp.x - 6 && p.x < cp.x + cp.w + 6) { cur = cp; break; }
-      }
-      if (cur && p.aim.x) {
-        var room = p.aim.x > 0 ? cur.x + cur.w - 16 - p.x : p.x - (cur.x + 16);
-        if (room < 64) p.aim.x *= Math.max(0, room / 64);
-      }
-
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { plats: function () { return plats(st); }, lavaY: lavaY });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

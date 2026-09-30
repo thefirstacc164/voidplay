@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['kingOfTheHill'])
+    || require('./kingOfTheHill.ai.js');
   var CX = 400, CY = 300, R = 270, HR = 90;
   var PHYS = { speed: 290, friction: 3.8 };
   var DASH = { power: 480, cd: 2200 };
@@ -95,33 +97,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var dc = S.dist(p.x, p.y, CX, CY);
-      var jitter = Math.sin(st.t / 400 + p.slot * 2) * 0.5;
-      var tx = CX - p.x, ty = CY - p.y;
-      var l = Math.hypot(tx, ty) || 1;
-      if (dc > HR * 0.55) {
-        p.aim = { x: tx / l + jitter * 0.3, y: ty / l - jitter * 0.3 };
-      } else {
-        var enemy = null, best = 1e9;
-        for (var q in st.p) {
-          var o = st.p[q];
-          if (!o.al || o === p) continue;
-          if (S.dist(o.x, o.y, CX, CY) < HR + 20) {
-            var dd = S.dist(p.x, p.y, o.x, o.y);
-            if (dd < best) { best = dd; enemy = o; }
-          }
-        }
-        if (enemy && best < 70) {
-          var dx = enemy.x - p.x, dy = enemy.y - p.y;
-          var el = Math.hypot(dx, dy) || 1;
-          p.aim = { x: dx / el, y: dy / el };
-          if (best < 55 && p.dcd <= 0 && Math.random() < 0.15) p.tp |= 16;
-        } else p.aim = { x: Math.cos(st.t / 700 + p.slot * 2) * 0.4, y: Math.sin(st.t / 700 + p.slot * 2) * 0.4 };
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

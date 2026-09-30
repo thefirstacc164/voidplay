@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['pixelPaint'])
+    || require('./pixelPaint.ai.js');
   var COLS = 40, ROWS = 30, CELL = 20, RADIUS = 27;
   var SPAWNS = [[120, 300], [680, 300], [400, 120], [400, 480]];
 
@@ -115,34 +117,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var pid = Number(k);
-      if (S.dist(p.x, p.y, p.mem.tx, p.mem.ty) < 40 || Math.random() < 0.003) {
-        var tries = 0, best = null, bestCount = -1;
-        while (tries++ < 14) {
-          var gx = (Math.random() * COLS) | 0, gy = (Math.random() * ROWS) | 0;
-          var count = 0;
-          for (var dy = -2; dy <= 2; dy++) {
-            for (var dx = -2; dx <= 2; dx++) {
-              var nx = gx + dx, ny = gy + dy;
-              if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-              if (st.tiles[ny * COLS + nx] !== pid) count++;
-            }
-          }
-          if (count > bestCount) {
-            bestCount = count;
-            best = { x: gx * CELL + CELL / 2, y: gy * CELL + CELL / 2 };
-          }
-        }
-        p.mem.tx = best.x;
-        p.mem.ty = best.y;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var dx = p.mem.tx - p.x, dy = p.mem.ty - p.y;
-      var l = Math.hypot(dx, dy) || 1;
-      p.aim = { x: dx / l, y: dy / l };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

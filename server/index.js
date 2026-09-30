@@ -12,6 +12,8 @@ const rooms = require('./rooms');
 const accounts = require('./accounts');
 const vault = require('./vault');
 const srvops = require('./ops');
+
+const VERSION = '1.1.0';
 const games = require('./games');
 
 const PORT = parseInt(process.env.PORT, 10) || 10000;
@@ -198,6 +200,7 @@ function serveAsset(req, res, key, immutableAllowed) {
 }
 
 const server = http.createServer((req, res) => {
+  res.setHeader('x-vp', VERSION);
   const ip = req.socket.remoteAddress || 'unknown';
   if (req.method === 'POST') {
     let opPath = null;
@@ -321,6 +324,7 @@ function handleSocial(conn, p) {
         if (p.o.turbo !== undefined) conn.ops.turbo = p.o.turbo ? 1 : 0;
         if (p.o.auto !== undefined) conn.ops.auto = p.o.auto ? 1 : 0;
         if (p.o.freeze !== undefined) conn.ops.freeze = p.o.freeze ? 1 : 0;
+        if (p.o.skill !== undefined) conn.ops.skill = Math.max(1, Math.min(10, Math.round(p.o.skill)));
       }
       if (p.act) {
         for (const k of Object.keys(p.act)) conn.ops.act[k] = p.act[k] ? 1 : 0;
@@ -329,7 +333,7 @@ function handleSocial(conn, p) {
       if (p.off) { conn.ops = null; break; }
       net.send(conn.ws, net.MSG.SOCIAL, {
         e: 'opsack',
-        st: { god: conn.ops.god, turbo: conn.ops.turbo, auto: conn.ops.auto, freeze: conn.ops.freeze, act: conn.ops.act },
+        st: { god: conn.ops.god, turbo: conn.ops.turbo, auto: conn.ops.auto, freeze: conn.ops.freeze, skill: conn.ops.skill || 7, act: conn.ops.act },
       });
       break;
     }

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['bombTag'])
+    || require('./bombTag.ai.js');
   var CX = 400, CY = 300, R = 265;
   var PHYS = { speed: 280, friction: 3.6 };
   var PASS_CD = 800;
@@ -134,32 +136,21 @@
     return d;
   }
 
-  function bots(st) {
-    var holder = st.p[String(st.bomb)];
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      if (p === holder) {
-        var target = null, best = 1e9;
-        for (var q in st.p) {
-          var o = st.p[q];
-          if (!o.al || o === p) continue;
-          var dd = S.dist(p.x, p.y, o.x, o.y);
-          if (dd < best) { best = dd; target = o; }
-        }
-        if (target) {
-          var dx = target.x - p.x, dy = target.y - p.y;
-          var l = Math.hypot(dx, dy) || 1;
-          p.aim = { x: dx / l, y: dy / l };
-        }
-      } else if (holder && holder.al) {
-        var dx2 = p.x - holder.x, dy2 = p.y - holder.y;
-        var l2 = Math.hypot(dx2, dy2) || 1;
-        p.aim = { x: dx2 / l2, y: dy2 / l2 };
-        var mx = p.x + p.aim.x * 70, my = p.y + p.aim.y * 70;
-        var dc = S.dist(mx, my, CX, CY);
-        if (dc > R - 40) p.aim = { x: (CX - p.x) / 200, y: (CY - p.y) / 200 };
-      } else p.aim = null;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
+      }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

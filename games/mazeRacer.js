@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['mazeRacer'])
+    || require('./mazeRacer.ai.js');
   var COLS = 25, ROWS = 18, CELL = 32;
   var W = COLS * CELL, H = ROWS * CELL;
   var GOAL = { c: COLS - 1, r: 0 };
@@ -170,40 +172,21 @@
     return d;
   }
 
-  function bots(st) {
-    if (!st._path) {
-      var par = new Int16Array(COLS * ROWS).fill(-1);
-      var queue = [GOAL.r * COLS + GOAL.c];
-      par[GOAL.r * COLS + GOAL.c] = GOAL.r * COLS + GOAL.c;
-      for (var qi = 0; qi < queue.length; qi++) {
-        var idx = queue[qi];
-        var r = (idx / COLS) | 0, c = idx % COLS;
-        var g = st._grid[r][c];
-        var nb = [];
-        if (!(g & 1) && r > 0) nb.push(idx - COLS);
-        if (!(g & 2) && c < COLS - 1) nb.push(idx + 1);
-        if (!(g & 4) && r < ROWS - 1) nb.push(idx + COLS);
-        if (!(g & 8) && c > 0) nb.push(idx - 1);
-        for (var i = 0; i < nb.length; i++) {
-          if (par[nb[i]] === -1) { par[nb[i]] = idx; queue.push(nb[i]); }
-        }
-      }
-      st._path = par;
-    }
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
-      if (!p.bot || !p.al || p.fin) continue;
-      var pc = cellOf(p);
-      var idx = pc.r * COLS + pc.c;
-      var next = st._path[idx];
-      if (next === -1 || next === idx) {
-        p.aim = { x: Math.sin(st.t / 400 + p.slot) * 0.7, y: Math.cos(st.t / 500 + p.slot) * 0.7 };
-        continue;
+      if (!p.bot || !p.al) continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var nr = (next / COLS) | 0, nc = next % COLS;
-      var tx = nc * CELL + CELL / 2, ty = nr * CELL + CELL / 2;
-      var wob = Math.sin(st.t / 300 + p.slot * 2.1) * 0.25;
-      p.aim = { x: (tx - p.x) / 40 + wob, y: (ty - p.y) / 40 };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { COLS: COLS, ROWS: ROWS, GOAL: GOAL, CELL: CELL });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

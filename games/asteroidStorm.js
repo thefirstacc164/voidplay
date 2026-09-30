@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['asteroidStorm'])
+    || require('./asteroidStorm.ai.js');
   var W = 800, H = 600;
   var PHYS = { speed: 300, friction: 5, r: 11, w: W };
 
@@ -135,34 +137,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var wind = Math.floor(st.t / 600);
-      var hsh = Math.sin(wind * 12.9898 + p.slot * 78.233) * 43758.5453;
-      hsh -= Math.floor(hsh);
-      if (hsh < 0.065 + (p.slot % 3) * 0.024) {
-        p.aim = { x: Math.sin(st.t / 500 + p.slot * 3.1) * 0.55, y: 0.18 };
-        continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var ax = Math.sin(st.t / 800 + p.slot * 2.1) * 0.3 + (W / 2 - p.x) / 1400;
-      var ay = 0.25;
-      var threat = 0;
-      for (var eid in st.en) {
-        var e = st.en[eid];
-        if (e.w) continue;
-        if (e.y < p.y - 200 || e.y > H) continue;
-        var tta = (p.y - e.y) / (e.vy || 200);
-        if (tta < 0 || tta > 1.4) continue;
-        var ix = e.x + e.vx * tta;
-        if (Math.abs(ix - p.x) < e.r + 42) {
-          ax += Math.sign(p.x - ix || (Math.random() - 0.5)) * (0.85 + (hsh % 0.35));
-          threat = 1;
-        }
-      }
-      if (!threat) ay = 0.15 + Math.sin(st.t / 900 + p.slot) * 0.25;
-      p.aim = { x: ax, y: ay };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

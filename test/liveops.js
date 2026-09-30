@@ -61,6 +61,7 @@ async function main() {
   (0, eval)(bundle);
   const VPX = globalThis.VPX;
   ok('bundle exports VPX', !!VPX);
+  ok('ops bundle is v1.1.0', VPX && VPX.ver === '1.1.0', VPX && VPX.ver);
   ok('bundle captured the key', VPX && VPX.info().adm === true);
 
   const realNet = globalThis.VP.net;

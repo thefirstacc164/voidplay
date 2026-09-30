@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['infected'])
+    || require('./infected.ai.js');
   var W = 800, H = 600;
   var SURV = { speed: 255, friction: 4 };
   var INF = { speed: 295, friction: 4 };
@@ -108,37 +110,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var target = null, best = 1e9;
-      for (var q in st.p) {
-        var o = st.p[q];
-        if (!o.al || o === p) continue;
-        if (p.inf !== o.inf) {
-          var dd = S.dist(p.x, p.y, o.x, o.y);
-          if (dd < best) { best = dd; target = o; }
-        }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      if (!target) {
-        if (p.inf) {
-          for (var q2 in st.p) {
-            var o2 = st.p[q2];
-            if (o2.al && o2 !== p) { target = o2; break; }
-          }
-        }
-      }
-      if (target) {
-        var dx = target.x - p.x, dy = target.y - p.y;
-        var l = Math.hypot(dx, dy) || 1;
-        var chase = p.inf;
-        p.aim = { x: dx / l * (chase ? 1 : -1), y: dy / l * (chase ? 1 : -1) };
-        var mx = p.x + p.aim.x * 60, my = p.y + p.aim.y * 60;
-        if (mx < 40 || mx > W - 40 || my < 40 || my > H - 40) {
-          p.aim = { x: (W / 2 - p.x) / 200, y: (H / 2 - p.y) / 150 };
-        }
-      } else p.aim = { x: Math.cos(st.t / 900 + p.slot), y: Math.sin(st.t / 700 + p.slot) };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

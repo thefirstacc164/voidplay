@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['bumperKnock'])
+    || require('./bumperKnock.ai.js');
   var CX = 400, CY = 300;
   var RADII = [270, 215, 160, 110];
   var PHYS = { speed: 300, friction: 3.5 };
@@ -113,27 +115,21 @@
     return d;
   }
 
-  function bots(st) {
-    var R = radius(st);
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var target = null, best = 1e9;
-      for (var q in st.p) {
-        var o = st.p[q];
-        if (o === p || !o.al) continue;
-        var dd = S.dist(p.x, p.y, o.x, o.y);
-        if (dd < best) { best = dd; target = o; }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var dc = S.dist(p.x, p.y, CX, CY);
-      if (dc > R - 55) {
-        p.aim = { x: (CX - p.x) / (dc || 1), y: (CY - p.y) / (dc || 1) };
-      } else if (target) {
-        var dx = target.x - p.x, dy = target.y - p.y;
-        var l = Math.hypot(dx, dy) || 1;
-        p.aim = { x: dx / l, y: dy / l };
-        if (best < 95 && p.dcd <= 0 && Math.random() < 0.2) p.tp |= 16;
-      } else p.aim = { x: (CX - p.x) / (dc || 1), y: (CY - p.y) / (dc || 1) };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { radius: function () { return radius(st); } });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

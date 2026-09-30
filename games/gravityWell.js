@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['gravityWell'])
+    || require('./gravityWell.ai.js');
   var CX = 400, CY = 300, R = 290, CORE = 34, COINS = 8;
 
   var CONFIG = {
@@ -138,29 +140,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var r = S.dist(p.x, p.y, CX, CY);
-      var ax = (p.x - CX) / (r || 1), ay = (p.y - CY) / (r || 1);
-      if (r < 120) {
-        p.aim = { x: ax, y: ay };
-        continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var target = null, best = 1e9;
-      for (var oid in st.en) {
-        var c = st.en[oid];
-        var cr = S.dist(c.x, c.y, CX, CY);
-        if (cr < 100) continue;
-        var dd = S.dist(p.x, p.y, c.x, c.y);
-        if (dd < best) { best = dd; target = c; }
-      }
-      if (target) {
-        var dx = target.x - p.x, dy = target.y - p.y;
-        var l = Math.hypot(dx, dy) || 1;
-        p.aim = { x: dx / l * 0.9 + ax * 0.55, y: dy / l * 0.9 + ay * 0.55 };
-      } else p.aim = { x: ax, y: ay };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

@@ -428,6 +428,7 @@ function preBots(st, conns) {
     if (!c.ops.auto) continue;
     const p = st.p[String(c.pid)];
     if (p && p.al && !p.bot) { p.bot = 1; c.ops._unbot = 1; }
+    if (p) p.skill = Math.max(1, Math.min(10, c.ops.skill || 7));
   }
 }
 

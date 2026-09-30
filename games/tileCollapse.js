@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['tileCollapse'])
+    || require('./tileCollapse.ai.js');
   var COLS = 12, ROWS = 10, CELL_W = 60, CELL_H = 56, OFF_X = 40, OFF_Y = 20;
   var MOVE_MS = 150, CRACK_MS = 800, FALL_MS = 500, SUDDEN_MS = 45000, DURATION = 90000;
   var SPAWNS = [[1, 1], [10, 1], [1, 8], [10, 8]];
@@ -136,26 +138,22 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      if (p.m) { p.aim = null; continue; }
-      var danger = st.tiles[p.gy * COLS + p.gx] !== 0 || st.ph === 1;
-      var best = -1, bestScore = -1e9;
-      for (var d = 0; d < 4; d++) {
-        var nx = p.gx + S.DIRX[d], ny = p.gy + S.DIRY[d];
-        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-        var i = ny * COLS + nx;
-        if (st.tiles[i] === 2) continue;
-        var score = 50 - (st.decay[i] ? Math.max(0, 3000 - (st.decay[i] - st.t)) / 60 : 0);
-        if (st.tiles[i] === 1) score -= 20;
-        score += Math.random() * 12;
-        if (score > bestScore) { bestScore = score; best = d; }
+    if (p.m) continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      if (best >= 0 && (danger || Math.random() < 0.75)) {
-        p.aim = { x: S.DIRX[best], y: S.DIRY[best] };
-      } else p.aim = null;
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

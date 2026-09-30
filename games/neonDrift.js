@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['neonDrift'])
+    || require('./neonDrift.ai.js');
   var W = 1700, H = 1300;
   var CX = 850, CY = 650, RX = 620, RY = 430;
   var NWP = 24, LAPS = 4, HALF = 50;
@@ -173,19 +175,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
-      if (!p.bot || !p.al || p.fin) continue;
-      var tgt = TRACK[(p.wp + 1) % NWP];
-      var tgt2 = TRACK[(p.wp + 2) % NWP];
-      var dx = (tgt.x + tgt2.x) / 2 - p.x, dy = (tgt.y + tgt2.y) / 2 - p.y;
-      var want = Math.atan2(dy, dx);
-      var diff = ((want - p.h + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      p.tp = 1;
-      if (diff > 0.05) p.tp |= 8;
-      else if (diff < -0.05) p.tp |= 4;
-      if (Math.abs(diff) > 0.55 && p.sp > 170) p.tp |= 16;
+      if (!p.bot || !p.al) continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
+      }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { TRACK: TRACK, NWP: NWP });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

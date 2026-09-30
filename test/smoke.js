@@ -97,6 +97,7 @@ async function main() {
   section('static files');
   const gamesJson = await get('/games.json');
   ok(gamesJson.status === 200, 'GET /games.json → 200');
+  ok((gamesJson.headers['x-vp'] || '') === '1.1.0', 'server reports version 1.1.0', gamesJson.headers['x-vp']);
   const manifest = JSON.parse(gamesJson.body.toString());
   ok(manifest.games && manifest.games.length === 20, 'manifest lists 20 games');
   ok(manifest.v !== undefined, 'manifest has asset version');

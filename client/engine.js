@@ -82,6 +82,7 @@
       return;
     }
     loading[id] = [cb];
+    var loadGame = function () {
     var s = document.createElement('script');
     s.src = '/games/' + id + '.js?v=' + (VP.ASSET_V || 0);
     s.onload = function () {
@@ -96,6 +97,12 @@
       for (var i = 0; i < list.length; i++) list[i](new Error('load failed'), null);
     };
     document.head.appendChild(s);
+    };
+    var a = document.createElement('script');
+    a.src = '/games/' + id + '.ai.js?v=' + (VP.ASSET_V || 0);
+    a.onload = loadGame;
+    a.onerror = loadGame;
+    document.head.appendChild(a);
   }
 
   function isLoaded(id) {
@@ -317,9 +324,10 @@
         for (var i = 0; i < d.en.er.length; i++) delete view.en[d.en.er[i]];
       }
     }
-    if (d.tiles) {
-      for (var ti = 0; ti < d.tiles.length; ti += 2) {
-        view.tiles[d.tiles[ti]] = d.tiles[ti + 1];
+    var tdl = d.tl || d.tiles;
+    if (tdl) {
+      for (var ti = 0; ti < tdl.length; ti += 2) {
+        view.tiles[tdl[ti]] = tdl[ti + 1];
       }
       watchTiles(view.tiles);
     }

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['hoverHockey'])
+    || require('./hoverHockey.ai.js');
   var W = 800, H = 600;
   var G_TOP = 235, G_BOT = 365;
   var PHYS = { speed: 380, friction: 6, r: 15, w: W };
@@ -154,21 +156,21 @@
     return d;
   }
 
-  function bots(st) {
-    var pk = st.puck;
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var gx = p.team === 0 ? W - 26 : 26;
-      var behind = { x: pk.x + (p.team === 0 ? -26 : 26), y: pk.y };
-      var dx = behind.x - p.x, dy = behind.y - p.y;
-      var dd = Math.hypot(dx, dy) || 1;
-      if (dd < 30) {
-        p.aim = { x: (gx - p.x) / 200, y: (H / 2 - p.y) / 300 };
-      } else {
-        p.aim = { x: dx / dd + Math.sin(st.t / 700 + p.slot * 2.3) * 0.2, y: dy / dd };
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      p.aim.y += (H / 2 - p.y) / 900;
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

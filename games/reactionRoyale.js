@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['reactionRoyale'])
+    || require('./reactionRoyale.ai.js');
   var W = 800, H = 600;
   var TYPES = ['click', 'wait', 'match', 'spam', 'freeze'];
   var TYPE_LABEL = { click: 'TAP FIRST', wait: "DON'T TAP", match: 'MATCH THE ARROW', spam: 'TAP FAST', freeze: 'FREEZE' };
@@ -168,32 +170,21 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      if (st.done) { p.aim = { x: 0, y: 0 }; continue; }
-      if (p.mem.ph !== st.phase) {
-        p.mem.ph = st.phase;
-        p.mem.delay = 300 + Math.random() * 700;
-        p.mem.err = Math.random() < 0.18;
-        p.mem.next = 0;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      if (st.phase !== 1) { p.aim = { x: Math.sin(st.t / 500 + p.slot) * 0.5, y: Math.cos(st.t / 620 + p.slot) * 0.4 }; continue; }
-      var ty = st.rounds[st.rn];
-      var el = st.t - st.phT;
-      if (ty === 'click') {
-        if (el > p.mem.delay && !p.out && st.rw < 0) p.tp |= 16;
-      } else if (ty === 'wait') {
-        if (p.mem.err && el > 500 + Math.random() * 1800) { if (Math.random() < 0.02) p.tp |= 16; }
-      } else if (ty === 'match') {
-        if (el > p.mem.delay && !p.out && st.rw < 0) {
-          p.tp |= p.mem.err ? (1 << ((st.tg + 1 + ((Math.random() * 3) | 0)) % 4)) : (1 << st.tg);
-        }
-      } else if (ty === 'spam') {
-        if (el > p.mem.next) { p.tp |= 16; p.mem.next = el + 130 + Math.random() * 90; }
-      }
-      p.aim = { x: 0, y: 0 };
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

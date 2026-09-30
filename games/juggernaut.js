@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['juggernaut'])
+    || require('./juggernaut.ai.js');
   var CX = 400, CY = 300, R = 270;
   var JG = { speed: 235, friction: 3.2 };
   var RUN = { speed: 295, friction: 3.6 };
@@ -104,8 +106,8 @@
         if (!a.al || !b.al) continue;
         var aJg = Number(ids[i]) === st.jg, bJg = Number(ids[j]) === st.jg;
         if (S.bounce(a, b, aJg ? 22 : 14, bJg ? 22 : 14, { e: 0.85, ma: aJg ? 3 : 1, mb: bJg ? 3 : 1 })) {
-          if (aJg) { b.lastHit = Number(ids[i]); b.vx += (b.x - a.x) * 2.2; b.vy += (b.y - a.y) * 2.2; }
-          if (bJg) { a.lastHit = Number(ids[j]); a.vx += (a.x - b.x) * 2.2; a.vy += (a.y - b.y) * 2.2; }
+          if (aJg) { a.lastHit = Number(ids[j]); b.vx += (b.x - a.x) * 2.2; b.vy += (b.y - a.y) * 2.2; }
+          if (bJg) { b.lastHit = Number(ids[i]); a.vx += (a.x - b.x) * 2.2; a.vy += (a.y - b.y) * 2.2; }
         }
       }
     }
@@ -139,38 +141,21 @@
     return d;
   }
 
-  function bots(st) {
-    var jg = st.p[String(st.jg)];
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var isJg = Number(k) === st.jg;
-      var target = null, best = 1e9;
-      for (var q in st.p) {
-        var o = st.p[q];
-        if (!o.al || o === p) continue;
-        var dd = S.dist(p.x, p.y, o.x, o.y);
-        if (dd < best) { best = dd; target = o; }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var dc = S.dist(p.x, p.y, CX, CY);
-      if (!isJg && dc > R - 50) {
-        p.aim = { x: (CX - p.x) / (dc || 1), y: (CY - p.y) / (dc || 1) };
-      } else if (target) {
-        var dx = target.x - p.x, dy = target.y - p.y;
-        var l = Math.hypot(dx, dy) || 1;
-        if (isJg) {
-          p.aim = { x: dx / l, y: dy / l };
-        } else {
-          var jd = jg ? S.dist(p.x, p.y, jg.x, jg.y) : 999;
-          var jgEdge = jg ? S.dist(jg.x, jg.y, CX, CY) : 0;
-          if (jg && jd < 80 && jgEdge > R - 90 && p.dcd <= 0 && Math.random() < 0.25) {
-            p.aim = { x: (jg.x - p.x) / (jd || 1), y: (jg.y - p.y) / (jd || 1) };
-            p.tp |= 16;
-          } else {
-            p.aim = { x: -dx / l * 0.8 + (CX - p.x) / 400, y: -dy / l * 0.8 + (CY - p.y) / 400 };
-          }
-        }
-      }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['colorRaid'])
+    || require('./colorRaid.ai.js');
   var COLS = 16, ROWS = 12, CELL_W = 46, CELL_H = 40, OFF_X = 32, OFF_Y = 60;
   var SPAWNS = [[1, 1], [14, 1], [1, 10], [14, 10]];
 
@@ -104,26 +106,22 @@
     return d;
   }
 
-  function bots(st) {
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
-      if (!p.bot || !p.al || p.m) { if (p.bot) p.aim = p.m ? p.aim : null; continue; }
-      var best = null, bestD = 1e9;
-      for (var dy = -5; dy <= 5; dy++) {
-        for (var dx = -5; dx <= 5; dx++) {
-          var nx = p.gx + dx, ny = p.gy + dy;
-          if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-          var i = ny * COLS + nx;
-          if (st.tiles[i] === p.pid) continue;
-          var dd = Math.abs(dx) + Math.abs(dy) + Math.random() * 2;
-          if (dd < bestD) { bestD = dd; best = { x: dx, y: dy }; }
-        }
+      if (!p.bot || !p.al) continue;
+    if (p.m) continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      if (best && (Math.abs(best.x) > Math.abs(best.y))) {
-        p.aim = { x: Math.sign(best.x), y: 0 };
-      } else if (best) {
-        p.aim = { x: 0, y: Math.sign(best.y) };
-      } else p.aim = null;
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

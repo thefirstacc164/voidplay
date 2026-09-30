@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['skyClimb'])
+    || require('./skyClimb.ai.js');
   var W = 800, H = 4200, ROWS = 42, GAP = 95;
   var PHYS = { grav: 1400, jump: 620, speed: 300, friction: 6, r: 12, w: W };
   var TOP_Y = 120;
@@ -121,55 +123,21 @@
     return d;
   }
 
-  function bots(st) {
-    var list = plats(st);
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      if (!p.ground) {
-        if (p.vy < 0) continue;
-        var blw = null, bb = 1e9;
-        for (var bi = 0; bi < list.length; bi++) {
-          var bp = list[bi];
-          if (bp.y < p.y + 20) continue;
-          var bdy = bp.y - p.y;
-          if (bdy > 420) continue;
-          var bnear = S.clamp(p.x, bp.x, bp.x + bp.w);
-          var bsc = Math.abs(bnear - p.x) * 0.6 + bdy * 0.5;
-          if (bsc < bb) { bb = bsc; blw = bnear; }
-        }
-        p.aim = { x: blw === null ? 0 : Math.sign(blw - p.x) * 0.85, y: 0 };
-        continue;
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      var above = null, best = 1e9;
-      for (var i = 0; i < list.length; i++) {
-        var pl = list[i];
-        if (pl.y >= p.y - 10) continue;
-        var dy = p.y - pl.y;
-        if (dy > 160) continue;
-        var near = S.clamp(p.x, pl.x + 14, pl.x + pl.w - 14);
-        var dx = near - p.x;
-        var score = Math.abs(dx) * 0.9 + dy * 0.5 + Math.random() * 26;
-        if (score < best) { best = score; above = { near: near, dy: dy }; }
-      }
-      if (above) {
-        var dx2 = above.near - p.x;
-        p.aim = { x: S.clamp(dx2 / 40, -1, 1), y: 0 };
-        if (Math.abs(dx2) < 24 && above.dy <= 150 && Math.abs(p.vx) < 150 && Math.random() < 0.6) p.tp |= 16;
-      } else {
-        p.aim = { x: Math.sign(p.x < W / 2 ? 1 : -1) * 0.5 + Math.sin(st.t / 500 + p.slot) * 0.4, y: 0 };
-        if (Math.random() < 0.02) p.tp |= 16;
-      }
-      var cur = null;
-      for (var ci = 0; ci < list.length; ci++) {
-        var cp = list[ci];
-        if (Math.abs(p.y - cp.y) < 7 && p.x > cp.x - 6 && p.x < cp.x + cp.w + 6) { cur = cp; break; }
-      }
-      if (cur && p.aim.x) {
-        var room = p.aim.x > 0 ? cur.x + cur.w - 16 - p.x : p.x - (cur.x + 16);
-        if (room < 64) p.aim.x *= Math.max(0, room / 64);
-      }
-
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk, { plats: function () { return plats(st); } });
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

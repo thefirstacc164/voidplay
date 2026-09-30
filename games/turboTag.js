@@ -3,6 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
+  var AI = (typeof self !== 'undefined' && self.VP && self.VP.AI && self.VP.AI['turboTag'])
+    || require('./turboTag.ai.js');
   var CX = 400, CY = 300, R = 270;
   var IT = { speed: 345, friction: 4 };
   var RUN = { speed: 265, friction: 4 };
@@ -121,57 +123,21 @@
     return d;
   }
 
-  function bots(st) {
-    var it = st.p[String(st.it)];
+function bots(st) {
     for (var k in st.p) {
       var p = st.p[k];
       if (!p.bot || !p.al) continue;
-      var target = null, best = 1e9;
-      for (var q in st.p) {
-        var o = st.p[q];
-        if (!o.al || o === p) continue;
-        var dd = S.dist(p.x, p.y, o.x, o.y);
-        if (dd < best) { best = dd; target = o; }
+      if (p.skill === undefined) {
+        var srr = Math.random();
+        p.skill = srr < 0.5 ? 3 : srr < 0.8 ? 4 : srr < 0.93 ? 5 : srr < 0.985 ? 6 : 7;
       }
-      if (Number(k) === st.it) {
-        var cands = [];
-        for (var q2 in st.p) {
-          var o2 = st.p[q2];
-          if (!o2.al || o2 === p) continue;
-          cands.push({ o: o2, d: S.dist(p.x, p.y, o2.x, o2.y) });
-        }
-        cands.sort(function (a, b) { return a.d - b.d; });
-        var pick = cands.length ? cands[0] : null;
-        if (st.imm > 0) {
-          for (var c = 0; c < cands.length; c++) {
-            if (cands[c].d > 140) { pick = cands[c]; break; }
-          }
-        }
-        if (pick) {
-          var lead = Math.min(1.1, pick.d / 300);
-          var dx = pick.o.x + pick.o.vx * lead - p.x;
-          var dy = pick.o.y + pick.o.vy * lead - p.y;
-          var l = Math.hypot(dx, dy) || 1;
-          p.aim = { x: dx / l, y: dy / l };
-        }
-      } else if (it && it.al) {
-        var dx2 = p.x - it.x, dy2 = p.y - it.y;
-        var l2 = Math.hypot(dx2, dy2) || 1;
-        p.aim = { x: dx2 / l2, y: dy2 / l2 };
-        var mx = p.x + p.aim.x * 70, my = p.y + p.aim.y * 70;
-        if (S.dist(mx, my, CX, CY) > R - 40) p.aim = { x: (CX - p.x) / 200, y: (CY - p.y) / 200 };
-        for (var q3 in st.p) {
-          var o3 = st.p[q3];
-          if (!o3.al || o3 === p || Number(q3) === st.it) continue;
-          var sx = p.x - o3.x, sy = p.y - o3.y;
-          var sd = Math.hypot(sx, sy);
-          if (sd > 0.1 && sd < 46) { p.aim.x += sx / sd * 0.7; p.aim.y += sy / sd * 0.7; }
-        }
-      } else if (target) {
-        var dx3 = target.x - p.x, dy3 = target.y - p.y;
-        var l3 = Math.hypot(dx3, dy3) || 1;
-        p.aim = { x: -dx3 / l3, y: -dy3 / l3 };
-      }
+      var sk = Math.max(1, Math.min(10, p.skill || 4));
+      var d = AI.think(st, p, sk);
+      if (!d) { p.aim = null; continue; }
+      p.aim = d.aim !== undefined ? d.aim : null;
+      if (d.k) S.latch(p, d.k);
+      if (d.tap) p.tp |= 16;
+      if (d.tp !== undefined) p.tp = d.tp;
     }
   }
 

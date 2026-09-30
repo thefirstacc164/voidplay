@@ -6,7 +6,7 @@ const path = require('path');
 const S = require('../shared/core.js');
 const G = {};
 const files = fs.readdirSync(path.join(__dirname, '..', 'games')).filter(f => f.endsWith('.js')).sort();
-for (const f of files) {
+for (const f of files.filter(x => x.endsWith('.js') && !x.endsWith('.ai.js'))) {
   const mod = require(path.join(__dirname, '..', 'games', f));
   G[mod.CONFIG.id] = mod;
 }
