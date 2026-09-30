@@ -11,7 +11,7 @@
   var ADMK = '';
   try { ADMK = window.VPXK || ''; delete window.VPXK; } catch (eAdm) { ADMK = ''; }
 
-  var OPS = { open: false, god: false, freeze: false, turbo: false, forceWin: false, act: {}, aids: {} };
+  var OPS = { open: false, god: false, freeze: false, turbo: false, auto: false, forceWin: false, act: {}, aids: {} };
   var frame = 0;
   var lastPos = {};
   var rrRound = -1;
@@ -53,7 +53,24 @@
   var GAME_ASSISTS = {
 
     asteroidStorm: [
-      { id: 'as-shield', label: 'meteor shield', run: function (st) {
+      { id: 'as-dodge', label: 'auto dodge', d: 'auto-steer away from meteors', run: function (st) {
+        eachOf(st, myIds(), function (p) {
+          for (var q = 0; q < 3; q++) {
+            var best = null, bd = 1e9;
+            for (var k in st.en) {
+              var e = st.en[k];
+              var d = Math.hypot(e.x - p.x, e.y - p.y) - e.r;
+              if (d < 150 && d < bd) { bd = d; best = e; }
+            }
+            if (!best) return;
+            var dx = p.x - best.x, dy = p.y - best.y;
+            var l = Math.hypot(dx, dy) || 1;
+            p.x += (dx / l) * 6;
+            p.y += (dy / l) * 6;
+          }
+        });
+      } },
+      { id: 'as-shield', label: 'meteor shield', d: 'meteors bounce off you', run: function (st) {
         var ids = myIds();
         eachOf(st, ids, function (p) {
           for (var k in st.en) {
@@ -65,7 +82,7 @@
     ],
 
     bombTag: [
-      { id: 'bt-pass', label: 'hot potato', run: function (st) {
+      { id: 'bt-pass', label: 'hot potato', d: 'shoves the bomb to the nearest player', run: function (st) {
         var ids = myIds();
         eachOf(st, ids, function (p, id) {
           if (st.bomb !== id) return;
@@ -73,19 +90,19 @@
           if (o !== null) { st.bomb = o; if (st.passCd !== undefined) st.passCd = 500; }
         });
       } },
-      { id: 'bt-fuse', label: 'cool fuse', run: function (st) {
+      { id: 'bt-fuse', label: 'cool fuse', d: 'the fuse burns slower', run: function (st) {
         if (st.fuse < 6500) st.fuse = 6500;
       } }
     ],
 
     bumperKnock: [
-      { id: 'bk-bump', label: 'super bump', run: function (st) {
+      { id: 'bk-bump', label: 'super bump', d: 'you knock everyone flying', run: function (st) {
         eachOf(st, myIds(), function (p) { p.dashT = 500; });
       } }
     ],
 
     colorRaid: [
-      { id: 'cr-brush', label: 'mega brush', run: function (st) {
+      { id: 'cr-brush', label: 'mega brush', d: 'huge painting radius', run: function (st) {
         eachOf(st, myIds(), function (p) {
           var gx = Math.round((p.x - 32) / 46), gy = Math.round((p.y - 60) / 40);
           for (var dy = -8; dy <= 8; dy++) for (var dx = -8; dx <= 8; dx++) {
@@ -99,7 +116,17 @@
     ],
 
     gravityWell: [
-      { id: 'gw-repel', label: 'core repel', run: function (st, dts) {
+      { id: 'gw-magnet', label: 'coin magnet', d: 'coins fly to you', run: function (st, dts) {
+        eachOf(st, myIds(), function (p) {
+          for (var k in st.en) {
+            var e = st.en[k];
+            var dx = p.x - e.x, dy = p.y - e.y;
+            var l = Math.hypot(dx, dy) || 1;
+            if (l < 240) { e.x += (dx / l) * 340 * dts; e.y += (dy / l) * 340 * dts; }
+          }
+        });
+      } },
+      { id: 'gw-repel', label: 'core repel', d: 'the core pushes you away', run: function (st, dts) {
         eachOf(st, myIds(), function (p) {
           var dx = p.x - 400, dy = p.y - 300;
           var r = Math.hypot(dx, dy) || 1;
@@ -113,7 +140,21 @@
     ],
 
     hoverHockey: [
-      { id: 'hh-magnet', label: 'puck magnet', run: function (st, dts) {
+      { id: 'hh-shot', label: 'power shot', d: 'slam the puck at their goal', run: function (st) {
+        var pk = st.puck;
+        if (!pk) return;
+        eachOf(st, myIds(), function (p, id) {
+          var d = Math.hypot(pk.x - p.x, pk.y - p.y);
+          if (d > 120) return;
+          var team = (p.slot - 1) % 2;
+          var tx = team === 0 ? 860 : -60;
+          var dx = tx - pk.x, dy = 300 - pk.y;
+          var l = Math.hypot(dx, dy) || 1;
+          pk.vx = (dx / l) * 560;
+          pk.vy = (dy / l) * 560;
+        });
+      } },
+      { id: 'hh-magnet', label: 'puck magnet', d: 'the puck sticks near you', run: function (st, dts) {
         var p = st.p['1'];
         if (!p || !p.al || !st.puck) return;
         var gx = p.team === 0 ? 830 : -30;
@@ -127,7 +168,7 @@
     ],
 
     infected: [
-      { id: 'in-immune', label: 'immune', run: function (st) {
+      { id: 'in-immune', label: 'immune', d: 'you can never be infected', run: function (st) {
         var ids = myIds();
         eachOf(st, ids, function (p, id) {
           if (st.inf !== id) return;
@@ -138,20 +179,27 @@
     ],
 
     juggernaut: [
-      { id: 'jg-always', label: 'always juggernaut', run: function (st) {
+      { id: 'jg-always', label: 'always juggernaut', d: 'you are always the juggernaut', run: function (st) {
         var p = st.p['1'];
         if (p && p.al) st.jg = 1;
       } }
     ],
 
     kingOfTheHill: [
-      { id: 'kh-score', label: 'triple score', run: function (st, dts) {
+      { id: 'kh-warp', label: 'hill warp', d: 'teleport onto the hill', run: function (st) {
+        eachOf(st, myIds(), function (p, id) {
+          if (id === 1) { p.x = 408; p.y = 300; }
+          else { p.x = 392; p.y = 300; }
+          p.vx = 0; p.vy = 0;
+        });
+      } },
+      { id: 'kh-score', label: 'triple score', d: 'x3 points while on the hill', run: function (st, dts) {
         eachOf(st, myIds(), function (p) { p.sc += 2 * dts; });
       } }
     ],
 
     laserMaze: [
-      { id: 'lm-calm', label: 'serenity', run: function (st) {
+      { id: 'lm-calm', label: 'serenity', d: 'drifts you to the safe center', run: function (st) {
         var p = st.p['1'];
         if (!p || !p.al) return;
         p.x += (400 - p.x) * 0.02;
@@ -160,11 +208,11 @@
     ],
 
     lavaFloor: [
-      { id: 'lv-moon', label: 'moon jump', run: function (st, dts, f) {
+      { id: 'lv-moon', label: 'moon jump', d: 'jump nonstop, even midair', run: function (st, dts, f) {
         if (f % 4 < 2) { E.keys1 |= 16; if (E.twoP) E.keys2 |= 16; }
         else { E.keys1 &= ~16; if (E.twoP) E.keys2 &= ~16; }
       } },
-      { id: 'lv-hover', label: 'hover', run: function (st, dts) {
+      { id: 'lv-hover', label: 'hover', d: 'float gently upward forever', run: function (st, dts) {
         eachOf(st, myIds(), function (p) {
           p.y -= 130 * dts;
           if (p.vy > 0) p.vy = 0;
@@ -173,7 +221,7 @@
     ],
 
     mazeRacer: [
-      { id: 'mr-steer', label: 'auto steer', run: function (st, dts) {
+      { id: 'mr-steer', label: 'auto steer', d: 'auto-drives you to the finish', run: function (st, dts) {
         var p = st.p['1'];
         if (!p || !p.al || !st._dist) return;
         var c = Math.max(0, Math.min(24, (p.x / 32) | 0));
@@ -197,7 +245,7 @@
     ],
 
     neonDrift: [
-      { id: 'nd-stream', label: 'slip stream', run: function (st, dts) {
+      { id: 'nd-stream', label: 'slip stream', d: 'extra speed on the racing line', run: function (st, dts) {
         eachOf(st, myIds(), function (p) {
           p.x += (p.fx || 0) * 150 * dts;
           p.y += (p.fy || 0) * 150 * dts;
@@ -206,7 +254,7 @@
     ],
 
     orbitDodge: [
-      { id: 'od-orbit', label: 'auto orbit', run: function (st, dts) {
+      { id: 'od-orbit', label: 'auto orbit', d: 'auto-orbits the safe gaps', run: function (st, dts) {
         eachOf(st, myIds(), function (p) {
           var th = Math.atan2(p.y - 300, p.x - 400);
           var r = Math.hypot(p.x - 400, p.y - 300) || 1;
@@ -238,7 +286,7 @@
     ],
 
     pixelPaint: [
-      { id: 'pp-splash', label: 'splash paint', run: function (st) {
+      { id: 'pp-splash', label: 'splash paint', d: 'huge painting splash', run: function (st) {
         eachOf(st, myIds(), function (p) {
           var gx = Math.round(p.x / 20), gy = Math.round(p.y / 20);
           for (var dy = -8; dy <= 8; dy++) for (var dx = -8; dx <= 8; dx++) {
@@ -252,7 +300,7 @@
     ],
 
     reactionRoyale: [
-      { id: 'rr-auto', label: 'auto tap', run: function (st) {
+      { id: 'rr-auto', label: 'auto tap', d: 'taps at the perfect moment', run: function (st) {
         if (st.phase !== 1) { rrPulse = 0; return; }
         var ty = st.rounds[st.rn];
         if (ty === 'click') {
@@ -271,7 +319,7 @@
     ],
 
     skyClimb: [
-      { id: 'sc-up', label: 'updraft', run: function (st, dts) {
+      { id: 'sc-up', label: 'updraft', d: 'a gentle wind lifts you', run: function (st, dts) {
         eachOf(st, myIds(), function (p) {
           p.y -= 300 * dts;
           if (p.vy > 0) p.vy = 0;
@@ -280,7 +328,12 @@
     ],
 
     snakePit: [
-      { id: 'sn-magnet', label: 'orb magnet', run: function (st) {
+      { id: 'sn-grow', label: 'grow fast', d: 'your snake keeps growing', run: function (st) {
+        eachOf(st, myIds(), function (p) {
+          if (p.grow !== undefined) p.grow += 2;
+        });
+      } },
+      { id: 'sn-magnet', label: 'orb magnet', d: 'orbs drift toward you', run: function (st) {
         eachOf(st, myIds(), function (p) {
           if (!p.body || !p.body.length) return;
           var head = p.body[0];
@@ -299,7 +352,13 @@
     ],
 
     tileCollapse: [
-      { id: 'tc-solid', label: 'solid ground', run: function (st) {
+      { id: 'tc-bridge', label: 'full bridge', d: 'the whole floor stays solid', run: function (st) {
+        for (var i = 0; i < st.tiles.length; i++) {
+          if (st.tiles[i] === 2) st.tiles[i] = 0;
+          st.decay[i] = 0;
+        }
+      } },
+      { id: 'tc-solid', label: 'solid ground', d: 'tiles never crack under you', run: function (st) {
         eachOf(st, myIds(), function (p) {
           if (p.gx === undefined) return;
           for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
@@ -315,7 +374,10 @@
     ],
 
     turboTag: [
-      { id: 'tt-never', label: 'never it', run: function (st) {
+      { id: 'tt-immortal', label: 'untaggable', d: 'tag immunity never runs out', run: function (st) {
+        st.imm = 9999;
+      } },
+      { id: 'tt-never', label: 'never it', d: 'instantly pass the tag away', run: function (st) {
         var ids = myIds();
         eachOf(st, ids, function (p, id) {
           if (st.it !== id) return;
@@ -340,16 +402,36 @@
       try { after(st, dt); } catch (e) {}
     };
     mod.bots = function (st) {
-      if (OPS.freeze) {
-        for (var k in st.p) if (st.p[k].bot && st.p[k].al) st.p[k].aim = null;
-        return;
+      var mine = (E.mode === 'local') ? myIds() : [];
+      var unbot = [];
+      if (OPS.auto && mine.length) {
+        for (var m = 0; m < mine.length; m++) {
+          var mp = st.p[String(mine[m])];
+          if (mp && mp.al && !mp.bot) { mp.bot = 1; unbot.push(mp); }
+        }
       }
-      if (_bots) _bots(st);
+      if (OPS.freeze) {
+        for (var k in st.p) {
+          if (!st.p[k].bot || !st.p[k].al) continue;
+          if (mine.indexOf(Number(k)) >= 0) continue;
+          st.p[k].aim = null;
+        }
+      } else if (_bots) {
+        try { _bots(st); } catch (e) {}
+      }
+      for (var u = 0; u < unbot.length; u++) unbot[u].bot = 0;
     };
     mod.checkWin = function (st) {
       if (OPS.forceWin && E.mode === 'local') {
         OPS.forceWin = false;
         return forced(st);
+      }
+      if (OPS.god && E.mode === 'local') {
+        var ids2 = myIds();
+        for (var g = 0; g < ids2.length; g++) {
+          var gp = st.p[String(ids2[g])];
+          if (gp && !gp.al) { gp.al = 1; gp.deathT = -1; }
+        }
       }
       return _win(st);
     };
@@ -380,15 +462,25 @@
         p.deathT = -1;
         var lp = lastPos[ids[i]];
         if (lp) { p.x = lp.x; p.y = lp.y; p.vx = 0; p.vy = 0; }
+        else { p.x = 400; p.y = 80; p.vx = 0; p.vy = 0; }
+      }
+      if (OPS.god && p.al) {
+        var wmod = window.VP_GAMES[E.gameId];
+        var ww = (wmod && wmod.CONFIG && wmod.CONFIG.world && wmod.CONFIG.world.w) || 800;
+        var wh = (wmod && wmod.CONFIG && wmod.CONFIG.world && wmod.CONFIG.world.h) || 600;
+        if (p.x < 20) p.x = 20;
+        if (p.x > ww - 20) p.x = ww - 20;
+        if (p.y < 20) p.y = 20;
+        if (p.y > wh - 20) p.y = wh - 20;
       }
       if (p.al) {
         if (OPS.god) lastPos[ids[i]] = { x: p.x, y: p.y };
         if (OPS.turbo) {
           var dir = keyDir(E.keys1);
-          if (dir && ids[i] === 1) { p.x += dir.x * 180 * dts; p.y += dir.y * 180 * dts; }
+          if (dir && ids[i] === 1) { p.x += dir.x * 260 * dts; p.y += dir.y * 260 * dts; }
           if (E.twoP && ids[i] === 2) {
             var d2 = keyDir(E.keys2);
-            if (d2) { p.x += d2.x * 180 * dts; p.y += d2.y * 180 * dts; }
+            if (d2) { p.x += d2.x * 260 * dts; p.y += d2.y * 260 * dts; }
           }
         }
       }
@@ -605,18 +697,27 @@
     } catch (e) {}
   }
 
-  function toggleRow(label, get, set) {
+  function toggleRow(label, get, set, desc) {
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 12px;cursor:pointer;';
+    var left = document.createElement('div');
+    left.style.cssText = 'min-width:0;';
     var sp = document.createElement('span');
     sp.textContent = label;
-    sp.style.cssText = 'font:600 12px/1.4 system-ui,sans-serif;color:#e8f6ff;letter-spacing:0.03em;';
+    sp.style.cssText = 'font:600 12px/1.4 system-ui,sans-serif;color:#e8f6ff;letter-spacing:0.03em;display:block;';
+    left.appendChild(sp);
+    if (desc) {
+      var dd = document.createElement('span');
+      dd.textContent = desc;
+      dd.style.cssText = 'font:500 9.5px/1.4 system-ui,sans-serif;color:rgba(232,246,255,0.42);display:block;';
+      left.appendChild(dd);
+    }
     var pill = document.createElement('span');
     pill.style.cssText = 'width:34px;height:18px;border-radius:999px;position:relative;flex:none;transition:background .15s;';
     var knob = document.createElement('span');
     knob.style.cssText = 'position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#e8f6ff;transition:left .15s;';
     pill.appendChild(knob);
-    row.appendChild(sp);
+    row.appendChild(left);
     row.appendChild(pill);
     function paint() {
       var on = get();
@@ -628,6 +729,25 @@
     row._paint = paint;
     paint();
     return row;
+  }
+
+  function refreshToggles() {
+    if (!panel) return;
+    var walk = function (el) {
+      if (el._paint) el._paint();
+      for (var i = 0; i < (el.children || []).length; i++) walk(el.children[i]);
+    };
+    walk(panel);
+  }
+
+  function opRow(fn) {
+    var b = document.createElement('button');
+    b.textContent = '\u26a1 MAKE ME OP';
+    b.style.cssText = 'display:block;width:calc(100% - 24px);margin:8px 12px 4px;padding:10px 0;border-radius:10px;border:1px solid rgba(255,68,0,0.55);background:rgba(255,68,0,0.16);color:#ff8866;font:800 12px/1.4 system-ui,sans-serif;letter-spacing:0.14em;cursor:pointer;';
+    b.onmouseenter = function () { b.style.background = 'rgba(255,68,0,0.32)'; };
+    b.onmouseleave = function () { b.style.background = 'rgba(255,68,0,0.16)'; };
+    b.onclick = fn;
+    return b;
   }
 
   function actionRow(label, fn) {
@@ -707,15 +827,31 @@
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:5px;padding:6px 6px;border-bottom:1px solid rgba(255,255,255,0.06);';
     var info = document.createElement('div');
-    info.style.cssText = 'flex:1;min-width:0;';
+    info.style.cssText = 'flex:1;min-width:0;cursor:pointer;';
     var nm = document.createElement('div');
-    nm.textContent = u.n;
-    nm.style.cssText = 'font:700 11px/1.3 system-ui,sans-serif;color:#e8f6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    nm.textContent = u.b ? u.n + ' [BANNED]' : u.n;
+    nm.style.cssText = 'font:700 11px/1.3 system-ui,sans-serif;color:' + (u.b ? '#ff6a3d' : '#e8f6ff') + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     var sub = document.createElement('div');
     sub.textContent = u.c + '\u00a2 \u00b7 ' + u.p + 'p \u00b7 ' + u.w + 'w \u00b7 ' + u.i + ' items';
     sub.style.cssText = 'font:600 9px/1.4 system-ui,sans-serif;color:rgba(232,246,255,0.45);';
     info.appendChild(nm);
     info.appendChild(sub);
+    info.title = 'click for details';
+    info.onclick = function () {
+      var dt = new Date(u.cr || 0);
+      var du = new Date(u.up || 0);
+      var lines = [
+        u.b ? u.n + ' — BANNED' : u.n,
+        'coins: ' + u.c,
+        'plays: ' + u.p + ' · wins: ' + u.w,
+        'shape: ' + u.sh + ' · trail: ' + u.tr,
+        'items: ' + (u.it && u.it.length ? u.it.join(', ') : 'none'),
+        'friends: ' + (u.fr && u.fr.length ? u.fr.join(', ') : 'none'),
+        'created: ' + (u.cr ? dt.toLocaleString() : '?'),
+        'last change: ' + (u.up ? du.toLocaleString() : '?')
+      ];
+      alert(lines.join('\n'));
+    };
     row.appendChild(info);
     row.appendChild(admBtn('REN', function () {
       var t = prompt('rename ' + u.n + ' to:', u.n);
@@ -729,6 +865,9 @@
       var t = prompt('set coins for ' + u.n + ':', String(u.c));
       if (t !== null) admReq('coins', { n: u.n, v: parseInt(t, 10) }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
     }));
+    row.appendChild(admBtn(u.b ? 'UNBAN' : 'BAN', function () {
+      admReq('ban', { n: u.n, on: u.b ? 0 : 1 }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
+    }));
     row.appendChild(admBtn('DEL', function () {
       if (confirm('delete ' + u.n + ' permanently?')) admReq('del', { n: u.n }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
     }));
@@ -738,7 +877,7 @@
   function buildPanel() {
     if (!window.document || !document.body) return;
     panel = document.createElement('div');
-    panel.style.cssText = 'position:fixed;top:58px;right:14px;width:292px;max-height:80vh;overflow-y:auto;background:rgba(8,10,26,0.95);border:1px solid rgba(0,255,242,0.35);border-radius:14px;box-shadow:0 12px 44px rgba(0,0,0,0.55);backdrop-filter:blur(10px);z-index:99999;font-family:system-ui,sans-serif;';
+    panel.style.cssText = 'position:fixed;top:58px;right:14px;width:318px;max-height:82vh;overflow-y:auto;background:rgba(8,10,26,0.95);border:1px solid rgba(0,255,242,0.35);border-radius:14px;box-shadow:0 12px 44px rgba(0,0,0,0.55);backdrop-filter:blur(10px);z-index:99999;font-family:system-ui,sans-serif;';
     var head = document.createElement('div');
     head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 12px 8px;border-bottom:1px solid rgba(0,255,242,0.18);';
     var ht = document.createElement('div');
@@ -757,9 +896,22 @@
     panel.appendChild(statusLine);
 
     panel.appendChild(sectionTitle('UNIVERSAL'));
-    panel.appendChild(toggleRow('god mode', function () { return OPS.god; }, function (v) { OPS.god = v; }));
-    panel.appendChild(toggleRow('freeze bots', function () { return OPS.freeze; }, function (v) { OPS.freeze = v; }));
-    panel.appendChild(toggleRow('turbo', function () { return OPS.turbo; }, function (v) { OPS.turbo = v; }));
+    panel.appendChild(opRow(function () {
+      OPS.god = true;
+      OPS.turbo = true;
+      OPS.auto = true;
+      var gid = E.gameId;
+      if (gid && GAME_ASSISTS[gid]) {
+        for (var i = 0; i < GAME_ASSISTS[gid].length; i++) OPS.act[GAME_ASSISTS[gid][i].id] = true;
+        OPS.aids[gid] = true;
+      }
+      refreshToggles();
+      toast('OP MODE ON');
+    }));
+    panel.appendChild(toggleRow('god mode', function () { return OPS.god; }, function (v) { OPS.god = v; }, 'cannot die, auto-revive'));
+    panel.appendChild(toggleRow('freeze bots', function () { return OPS.freeze; }, function (v) { OPS.freeze = v; }, 'every bot stands still'));
+    panel.appendChild(toggleRow('auto play', function () { return OPS.auto; }, function (v) { OPS.auto = v; }, 'a bot plays for you'));
+    panel.appendChild(toggleRow('turbo', function () { return OPS.turbo; }, function (v) { OPS.turbo = v; }, '+speed while you hold a direction'));
     panel.appendChild(actionRow('INSTANT WIN', function () { OPS.forceWin = true; }));
 
     if (ADMK) panel.appendChild(buildUsersBox());
@@ -800,7 +952,7 @@
       } else {
         for (var c = 0; c < list.length; c++) {
           (function (cheat) {
-            var row = toggleRow(cheat.label, function () { return !!OPS.act[cheat.id]; }, function (v) { OPS.act[cheat.id] = v; });
+            var row = toggleRow(cheat.label, function () { return !!OPS.act[cheat.id]; }, function (v) { OPS.act[cheat.id] = v; }, cheat.d);
             if (!local) row.style.opacity = '0.38';
             gameBox.appendChild(row);
           })(list[c]);
@@ -822,6 +974,7 @@
     bits.push(E.mode === 'local' ? (E.twoP ? 'local 2p' : 'local') : E.mode === 'remote' ? 'online' : 'menu');
     if (E.st && E.st.p) bits.push(Object.keys(E.st.p).length + ' players');
     if (OPS.god) bits.push('GOD');
+    if (OPS.auto) bits.push('AUTO');
     if (OPS.freeze) bits.push('FROZEN');
     if (OPS.turbo) bits.push('TURBO');
     statusLine.textContent = bits.join(' \u00b7 ');
@@ -860,6 +1013,7 @@
     god: function (v) { OPS.god = v === undefined ? !OPS.god : !!v; return OPS.god; },
     freeze: function (v) { OPS.freeze = v === undefined ? !OPS.freeze : !!v; return OPS.freeze; },
     turbo: function (v) { OPS.turbo = v === undefined ? !OPS.turbo : !!v; return OPS.turbo; },
+    auto: function (v) { OPS.auto = v === undefined ? !OPS.auto : !!v; return OPS.auto; },
     win: function () { OPS.forceWin = true; },
     aid: function (v) {
       if (!E.gameId || !AIDS[E.gameId]) return false;
@@ -872,7 +1026,7 @@
       return OPS.act[id];
     },
     info: function () {
-      return { game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, act: OPS.act, aids: OPS.aids };
+      return { game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, auto: OPS.auto, act: OPS.act, aids: OPS.aids };
     },
     _h: hook
   };

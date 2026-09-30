@@ -3,7 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.VP_GAMES = root.VP_GAMES || {}; root.VP_GAMES[api.CONFIG.id] = api; }
 })(typeof self !== 'undefined' ? self : globalThis, function (S) {
-  var W = 800, H = 1500, ROWS = 13, GAP = 108;
+  var W = 800, H = 1500, ROWS = 13, GAP = 104;
   var PHYS = { grav: 1400, jump: 620, speed: 300, friction: 6, r: 12, w: W };
   var BASE = 1560;
 
@@ -16,12 +16,12 @@
   };
 
   function lavaY(t) {
-    return BASE - (t * 0.011 + t * t * 0.00000001);
+    return BASE - (t * 0.0088 + t * t * 0.000000007);
   }
 
   function plats(st) {
     if (!st._plats) {
-      st._plats = S.genLadder(st.seed, ROWS, GAP, W, 95, 175);
+      st._plats = S.genLadder(st.seed, ROWS, GAP, W, 112, 190);
       st._plats.push({ x: 12, y: 1452, w: W - 24 });
     }
     return st._plats;

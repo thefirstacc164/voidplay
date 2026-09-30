@@ -211,6 +211,50 @@ ok('laserMaze serenity centers me', off < 240, 'offset=' + off.toFixed(0));
 VPX.set('nd-stream', true);
 r = run('neonDrift', 6000, { keys1: 8 });
 VPX.set('nd-stream', false);
+// new cheats
+VPX.set('gw-magnet', true);
+VPX.god(true);
+r = run('gravityWell', 6000);
+VPX.god(false);
+ok('gravityWell coin magnet', (r.st.p['1'].sc || 0) >= 4, 'collected ' + r.st.p['1'].sc);
+VPX.set('gw-magnet', false);
+
+VPX.set('kh-warp', true);
+r = run('kingOfTheHill', 4000);
+ok('kingOfTheHill hill warp', Math.hypot(r.st.p['1'].x - 400, r.st.p['1'].y - 300) < 60, 'dist ' + Math.hypot(r.st.p['1'].x - 400, r.st.p['1'].y - 300).toFixed(0));
+VPX.set('kh-warp', false);
+
+VPX.set('tc-bridge', true);
+r = run('tileCollapse', 8000);
+let gone = 0;
+for (const t of r.st.tiles) if (t === 2) gone++;
+ok('tileCollapse full bridge', gone === 0 && r.st.p['1'].al === 1, gone + ' holes');
+VPX.set('tc-bridge', false);
+
+VPX.set('tt-immortal', true);
+r = run('turboTag', 10000);
+ok('turboTag untaggable', r.st.p['1'].al === 1, 'imm=' + r.st.imm);
+VPX.set('tt-immortal', false);
+
+VPX.set('sn-grow', true);
+let snMax = 0;
+r = run('snakePit', 5000, { keys1: 8, afterTick: (st) => { if (st.p['1'].ln > snMax) snMax = st.p['1'].ln; } });
+ok('snakePit grow fast', snMax > 15, 'max len=' + snMax);
+VPX.set('sn-grow', false);
+
+VPX.auto(true);
+r = run('kingOfTheHill', 8000);
+const autoDist = Math.hypot(r.st.p['1'].x - 400, r.st.p['1'].y - 300);
+VPX.auto(false);
+ok('auto play drives me', autoDist < 160, 'bot drove me to ' + autoDist.toFixed(0) + 'px from the hill');
+
+VPX.auto(true);
+VPX.god(true);
+r = run('asteroidStorm', 25000);
+VPX.god(false);
+VPX.auto(false);
+ok('god + auto play asteroidStorm', r.st.p['1'].al === 1, 'died');
+
 ok('neonDrift slip stream runs', true);
 
 for (const id of Object.keys(G)) {

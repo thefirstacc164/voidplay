@@ -133,6 +133,7 @@ async function login(conn, name, pass, token) {
   }
   const user = vault.get().users[key];
   if (!user) return { e: 'auth', ok: 0, msg: 'Wrong name or password' };
+  if (user.banned) return { e: 'auth', ok: 0, msg: 'This account is banned' };
   if (!token) {
     const hash = await hashPassword(pass, user.salt);
     const a = Buffer.from(hash);
@@ -264,10 +265,27 @@ function adminList() {
       p: u.stats ? u.stats.plays || 0 : 0,
       w: u.stats ? u.stats.wins || 0 : 0,
       i: Array.isArray(u.items) ? u.items.length : 0,
+      b: u.banned ? 1 : 0,
+      sh: u.shape || 'sq',
+      tr: u.trail || 't0',
+      it: Array.isArray(u.items) ? u.items.slice(0, 30) : [],
+      fr: Array.isArray(u.friends) ? u.friends.slice(0, 30) : [],
+      cr: u.created || 0,
+      up: u.updated || 0,
     });
   }
   list.sort((a, b) => b.c - a.c);
   return { ok: 1, users: list };
+}
+
+function adminBan(name, on) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!vault.get().users[key]) return { ok: 0, msg: 'No such player' };
+  vault.mutate((d) => {
+    d.users[key].banned = on ? 1 : 0;
+    d.users[key].updated = Date.now();
+  });
+  return { ok: 1, msg: on ? 'Banned' : 'Unbanned' };
 }
 
 function adminRename(from, to) {
@@ -342,6 +360,7 @@ async function admin(op, p) {
     case 'ren': return adminRename(p && p.f, p && p.t);
     case 'pass': return await adminPass(p && p.n, p && p.np);
     case 'del': return adminDel(p && p.n);
+    case 'ban': return adminBan(p && p.n, p && p.on);
     case 'coins': return adminCoins(p && p.n, p && p.v);
     default: return { ok: 0, msg: 'Unknown op' };
   }
