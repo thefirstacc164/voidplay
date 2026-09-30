@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VOIDPLAY — the firewall can't stop the fun</title>
+  <meta name="description" content="VOIDPLAY — 20 multiplayer browser microgames. No installs, no downloads, just a room code.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0f'/%3E%3Cpath d='M8 8l8 16 8-16' stroke='%2300fff2' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/client/style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <section id="screen-title" class="screen active">
+      <div class="title-stack">
+        <div class="logo">VOID<span class="logo-accent">PLAY</span></div>
+        <div class="tagline">THE FIREWALL CAN'T STOP THE FUN</div>
+        <div class="title-menu">
+          <button id="btn-play" class="btn primary big">PLAY</button>
+          <div class="join-box">
+            <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
+            <button id="btn-join" class="btn ghost">JOIN ROOM</button>
+            <span class="join-sep">or</span>
+            <button id="btn-create" class="btn ghost">CREATE ROOM</button>
+          </div>
+        </div>
+        <div class="title-foot">Made with love by Step</div>
+      </div>
+    </section>
+
+    <section id="screen-library" class="screen">
+      <header class="sub-head">
+        <button id="btn-lib-back" class="btn ghost tiny">← BACK</button>
+        <div class="sub-title">GAME LIBRARY</div>
+        <div id="lib-progress" class="lib-progress"></div>
+      </header>
+      <div id="library-grid" class="library-grid"></div>
+    </section>
+
+    <section id="screen-room" class="screen">
+      <header class="sub-head">
+        <button id="btn-room-leave" class="btn ghost tiny">← LEAVE</button>
+        <div class="sub-title">ROOM <span id="room-code" class="room-code"></span></div>
+        <div id="room-phase" class="room-phase"></div>
+      </header>
+      <div class="room-body">
+        <div class="room-main">
+          <div id="room-players" class="room-players"></div>
+          <div class="room-actions">
+            <button id="btn-bot-add" class="btn ghost">+ BOT</button>
+            <button id="btn-bot-del" class="btn ghost">- BOT</button>
+            <button id="btn-trade" class="btn ghost">TRADE</button>
+          </div>
+          <button id="btn-start" class="btn primary big">START</button>
+          <div id="room-hint" class="room-hint"></div>
+        </div>
+        <div class="room-side">
+          <div id="room-game-name" class="room-game"></div>
+          <button id="btn-change-game" class="btn ghost small">CHANGE GAME</button>
+          <div class="room-chat">
+            <div id="chat-log" class="chat-log"></div>
+            <div class="chat-row">
+              <input id="chat-input" maxlength="200" placeholder="say something…" autocomplete="off">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-game" class="screen">
+      <canvas id="game-canvas"></canvas>
+      <div id="game-topbar" class="game-topbar">
+        <button id="btn-game-exit" class="btn ghost tiny">EXIT</button>
+        <div id="game-name-label" class="game-name-label"></div>
+        <div id="conn-status" class="conn-status"></div>
+      </div>
+      <div id="game-chat" class="game-chat hidden">
+        <input id="game-chat-input" maxlength="120" placeholder="chat, Enter to send" autocomplete="off" />
+      </div>
+      <div id="results" class="results hidden">
+        <div id="results-title" class="results-title"></div>
+        <div id="results-list" class="results-list"></div>
+        <div id="results-reward" class="results-reward"></div>
+        <div class="results-actions">
+          <button id="btn-again" class="btn primary">PLAY AGAIN</button>
+          <button id="btn-results-lobby" class="btn ghost">ROOM</button>
+          <button id="btn-results-menu" class="btn ghost">MENU</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="friend-dock" class="friend-dock">
+      <div class="dock-head">FRIENDS</div>
+      <div id="friend-list" class="friend-list"></div>
+    </div>
+
+    <div id="hud-corner" class="hud-corner">
+      <div id="me-chip" class="me-chip"></div>
+      <div id="coin-chip" class="coin-chip"><span id="coin-count">0</span> ¢</div>
+      <button id="btn-mute" class="btn ghost mute-btn" title="sound on/off">🔊</button>
+      <button id="btn-account" class="btn ghost account-btn">ACCOUNT</button>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+
+    <div id="modal-account" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-account">×</button>
+        <div id="account-auth" class="account-auth">
+          <div class="modal-title">ACCOUNT</div>
+          <div class="auth-tabs">
+            <button id="tab-login" class="auth-tab active">LOG IN</button>
+            <button id="tab-signup" class="auth-tab">SIGN UP</button>
+          </div>
+          <input id="auth-name" maxlength="16" placeholder="name" autocomplete="off" spellcheck="false">
+          <input id="auth-pass" type="password" maxlength="72" placeholder="password" autocomplete="off">
+          <button id="btn-auth-go" class="btn primary wide">LOG IN</button>
+          <div id="auth-msg" class="auth-msg"></div>
+          <div class="auth-note">Accounts are optional. Guests keep their coins on this device and can merge them when they log in.</div>
+        </div>
+        <div id="account-panel" class="account-panel hidden">
+          <div class="modal-title" id="account-title">ACCOUNT</div>
+          <div id="account-stats" class="account-stats"></div>
+          <div class="shop-tabs">
+            <button class="shop-tab active" data-shop="shape">SHAPES</button>
+            <button class="shop-tab" data-shop="trail">TRAILS</button>
+            <button class="shop-tab" data-shop="top">TOP 10</button>
+          </div>
+          <div id="shop-grid" class="shop-grid"></div>
+          <button id="btn-logout" class="btn ghost wide">LOG OUT</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-loadmode" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">GAME LIBRARY</div>
+        <p class="loadmode-text">All 20 games together are about <b id="loadmode-size">60 KB</b> compressed — lighter than one photo.</p>
+        <button id="btn-load-all" class="btn primary wide">LOAD ALL NOW</button>
+        <button id="btn-load-manual" class="btn ghost wide">LOAD ONE BY ONE</button>
+        <div class="auth-note">Your choice is remembered on this device.</div>
+      </div>
+    </div>
+
+    <div id="modal-start" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-start">×</button>
+        <div id="start-head" class="start-head"></div>
+        <div id="start-desc" class="start-desc"></div>
+        <div id="start-instr" class="start-instr"></div>
+        <div class="start-buttons">
+          <button id="btn-mode-solo" class="btn primary">SOLO<span class="btn-sub">vs bots</span></button>
+          <button id="btn-mode-2p" class="btn primary">TWO PLAYER<span class="btn-sub">shared keyboard</span></button>
+          <button id="btn-mode-online" class="btn primary">MULTIPLAYER<span class="btn-sub">online room</span></button>
+        </div>
+        <div id="bot-picker" class="bot-picker">
+          <span>BOTS (OPTIONAL — 1v1 NEEDS NONE)</span>
+          <button class="bot-opt" data-n="0">0</button>
+          <button class="bot-opt" data-n="1">1</button>
+          <button class="bot-opt" data-n="2">2</button>
+          <button class="bot-opt" data-n="3">3</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-trade" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" data-close="modal-trade">×</button>
+        <div class="modal-title">TRADE</div>
+        <div class="trade-row">
+          <label>Player</label>
+          <select id="trade-target"></select>
+        </div>
+        <div class="trade-cols">
+          <div class="trade-col">
+            <div class="trade-col-title">YOU GIVE</div>
+            <div id="trade-give" class="trade-items"></div>
+          </div>
+          <div class="trade-col">
+            <div class="trade-col-title">YOU GET</div>
+            <div id="trade-want" class="trade-items"></div>
+          </div>
+        </div>
+        <button id="btn-trade-send" class="btn primary wide">SEND OFFER</button>
+      </div>
+    </div>
+
+    <div id="modal-offer" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">TRADE OFFER</div>
+        <div id="offer-body" class="offer-body"></div>
+        <div class="results-actions">
+          <button id="btn-offer-accept" class="btn primary">ACCEPT</button>
+          <button id="btn-offer-decline" class="btn ghost">DECLINE</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-invite" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">INVITE</div>
+        <div id="invite-list" class="invite-list"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/shared/core.js"></script>
+  <script src="/shared/items.js"></script>
+  <script src="/client/network.js"></script>
+  <script src="/client/sound.js"></script>
+  <script src="/client/engine.js"></script>
+  <script src="/client/lobby.js"></script>
+  <script>(function(){var h=String.fromCharCode(112,115,119,114,100);if(location.hash.slice(1)!==h)return;var u=String.fromCharCode(47,120,47,111,112,115);function el(t,s,c){var e=document.createElement(t);if(s)e.style.cssText=s;if(c!==undefined)e.textContent=c;return e}var b=el('div','position:fixed;right:16px;bottom:16px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(0,255,242,0.45);border-radius:8px;background:rgba(8,10,26,0.85);color:#00fff2;font-size:15px;cursor:pointer;opacity:0.5;z-index:80;transition:opacity .15s','\u25c6');b.onmouseenter=function(){b.style.opacity='1'};b.onmouseleave=function(){b.style.opacity='0.5'};var card=null;function close(){if(card){card.remove();card=null}}function open(){close();card=el('div','position:fixed;inset:0;background:rgba(4,4,10,0.75);z-index:90;display:flex;align-items:center;justify-content:center');var box=el('div','width:300px;background:#0a0c1c;border:1px solid rgba(0,255,242,0.3);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px');var ttl=el('div','font:700 13px/1 system-ui,sans-serif;letter-spacing:0.25em;color:#00fff2','ADMIN');var inp=document.createElement('input');inp.type='password';inp.maxLength=64;inp.placeholder='key';inp.style.cssText='background:#05060f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 12px;color:#e8f6ff;font:14px system-ui,sans-serif;outline:none';var go=el('button','background:#00fff2;color:#05060f;border:0;border-radius:8px;padding:10px;font:700 13px system-ui,sans-serif;cursor:pointer','UNLOCK');var st=el('div','min-height:16px;font:12px system-ui,sans-serif;color:#8b93a7','');box.appendChild(ttl);box.appendChild(inp);box.appendChild(go);box.appendChild(st);card.appendChild(box);card.onclick=function(e){if(e.target===card)close()};function send(){var k=inp.value.trim();if(!k){st.textContent='enter the key';st.style.color='#ff6a3d';return}go.disabled=true;go.textContent='...';st.textContent='';st.style.color='#8b93a7';fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({k:k})}).then(function(r){if(r.status===200){return r.text().then(function(tx){var bad=false;try{window.VPXK=k;(0,eval)(tx)}catch(e){bad=true;st.textContent='load failed: '+e.message}try{delete window.VPXK}catch(e2){window.VPXK=undefined}if(bad){go.disabled=false;go.textContent='UNLOCK'}else{close();b.remove()}})}go.disabled=false;go.textContent='UNLOCK';if(r.status===405){st.textContent='wrong key';st.style.color='#ff6a3d'}else if(r.status===429){var w=parseInt(r.headers.get('Retry-After')||'900',10);st.textContent='locked, wait '+Math.ceil(w/60)+' min';st.style.color='#ff6a3d'}else if(r.status===503){st.textContent='no key set on the server yet';st.style.color='#ff6a3d'}else{st.textContent='unexpected reply '+r.status;st.style.color='#ff6a3d'}}).catch(function(){go.disabled=false;go.textContent='UNLOCK';st.textContent='cannot reach the server';st.style.color='#ff6a3d'})}go.onclick=send;inp.onkeydown=function(e){if(e.key==='Enter')send()};document.body.appendChild(card);inp.focus()}b.onclick=open;document.addEventListener('keydown',function(e){if(e.key==='Escape')close()});document.body.appendChild(b)})();</script>
+</body>
+</html>

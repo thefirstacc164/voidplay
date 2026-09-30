@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: voidplay
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    sync: false
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: VAULT_KEY
+        sync: false
+      - key: GH_REPO
+        sync: false
+      - key: GH_TOKEN
+        sync: false
+      - key: PSWRD_PSWRD
+        sync: false
