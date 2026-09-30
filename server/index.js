@@ -11,6 +11,7 @@ const net = require('./network');
 const rooms = require('./rooms');
 const accounts = require('./accounts');
 const vault = require('./vault');
+const srvops = require('./ops');
 const games = require('./games');
 
 const PORT = parseInt(process.env.PORT, 10) || 10000;
@@ -58,6 +59,7 @@ try { opsBundle = fs.readFileSync(path.join(ROOT, 'private', 'ops.js')); } catch
 const opsKeyHash = process.env.PSWRD_PSWRD
   ? crypto.createHash('sha256').update(String(process.env.PSWRD_PSWRD).trim()).digest()
   : null;
+srvops.init(opsKeyHash);
 const opsFails = new Map();
 const OPS_MAX_FAILS = 5;
 const OPS_LOCK_MS = 15 * 60 * 1000;
@@ -306,6 +308,31 @@ function handleSocial(conn, p) {
     case 'invite': rooms.invite(conn, p.to, p.g); break;
     case 'chat': rooms.chat(conn, p.t); break;
     case 'watch': rooms.watch(conn, p.f); break;
+    case 'ops': {
+      if (!opsKeyHash) break;
+      if (!srvops.keyOk(p.k)) {
+        conn.opsTries = (conn.opsTries || 0) + 1;
+        break;
+      }
+      conn.opsTries = 0;
+      if (!conn.ops) conn.ops = { on: true, god: 0, turbo: 0, auto: 0, freeze: 0, force: 0, act: {} };
+      if (p.o) {
+        if (p.o.god !== undefined) conn.ops.god = p.o.god ? 1 : 0;
+        if (p.o.turbo !== undefined) conn.ops.turbo = p.o.turbo ? 1 : 0;
+        if (p.o.auto !== undefined) conn.ops.auto = p.o.auto ? 1 : 0;
+        if (p.o.freeze !== undefined) conn.ops.freeze = p.o.freeze ? 1 : 0;
+      }
+      if (p.act) {
+        for (const k of Object.keys(p.act)) conn.ops.act[k] = p.act[k] ? 1 : 0;
+      }
+      if (p.win) conn.ops.force = 1;
+      if (p.off) { conn.ops = null; break; }
+      net.send(conn.ws, net.MSG.SOCIAL, {
+        e: 'opsack',
+        st: { god: conn.ops.god, turbo: conn.ops.turbo, auto: conn.ops.auto, freeze: conn.ops.freeze, act: conn.ops.act },
+      });
+      break;
+    }
     default: break;
   }
 }
@@ -320,6 +347,7 @@ function handle(conn, msg) {
       const seq = p[1] | 0;
       if (!(seq >= 0)) return;
       if (seq > conn.lastSeq) conn.lastSeq = seq;
+      conn.keys = keys & 63;
       rooms.routeInput(conn, keys & 63);
       break;
     }

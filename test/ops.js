@@ -192,6 +192,15 @@ r = run('hoverHockey', 15000);
 VPX.set('hh-magnet', false);
 ok('hoverHockey puck magnet', r.st.sc[0] > 0 || r.st.puck.x > 500, 'sc=' + r.st.sc[0] + ' puckX=' + r.st.puck.x.toFixed(0));
 
+VPX.set('hh-keeper', true);
+r = run('hoverHockey', 15000, {
+  beforeTick(st, i) {
+    if (i === 0) { st.puck.x = 220; st.puck.y = 300; st.puck.vx = -540; st.puck.vy = 90; }
+  }
+});
+VPX.set('hh-keeper', false);
+ok('hoverHockey perfect keeper', r.st.sc[1] === 0 && r.st.p['1'].x < 175, 'conceded=' + r.st.sc[1] + ' kx=' + r.st.p['1'].x.toFixed(0));
+
 VPX.set('bk-bump', true);
 r = run('bumperKnock', 5000);
 VPX.set('bk-bump', false);
@@ -237,10 +246,12 @@ ok('turboTag untaggable', r.st.p['1'].al === 1, 'imm=' + r.st.imm);
 VPX.set('tt-immortal', false);
 
 VPX.set('sn-grow', true);
+VPX.auto(true);
 let snMax = 0;
-r = run('snakePit', 5000, { keys1: 8, afterTick: (st) => { if (st.p['1'].ln > snMax) snMax = st.p['1'].ln; } });
-ok('snakePit grow fast', snMax > 15, 'max len=' + snMax);
+r = run('snakePit', 5000, { afterTick: (st) => { if (st.p['1'].ln > snMax) snMax = st.p['1'].ln; } });
+VPX.auto(false);
 VPX.set('sn-grow', false);
+ok('snakePit grow fast', snMax > 15, 'max len=' + snMax);
 
 VPX.auto(true);
 r = run('kingOfTheHill', 8000);
@@ -262,6 +273,19 @@ for (const id of Object.keys(G)) {
   run(id, 3000);
   ok(id + ' smoke with hooks', true);
 }
+
+console.log('--- server ops module ---');
+
+const srvops = require('../server/ops');
+const hst = { puck: { x: 220, y: 300, vx: -540, vy: 90 }, p: { '1': { pid: 1, slot: 1, team: 0, al: 1, x: 400, y: 300, vx: 0, vy: 0 } } };
+srvops.ASSISTS.hoverHockey.find((a) => a.id === 'hh-keeper').run(hst, 0.05, [1]);
+ok('server keeper intercepts the shot line', Math.abs(hst.p['1'].x - 40) < 1 && Math.abs(hst.p['1'].y - 336) < 8, 'x=' + hst.p['1'].x.toFixed(1) + ' y=' + hst.p['1'].y.toFixed(1));
+const hst2 = { puck: { x: 700, y: 280, vx: 520, vy: -40 }, p: { '1': { pid: 1, slot: 2, team: 1, al: 1, x: 400, y: 300, vx: 0, vy: 0 } } };
+srvops.ASSISTS.hoverHockey.find((a) => a.id === 'hh-keeper').run(hst2, 0.05, [1]);
+ok('server keeper mirrors for team 1', Math.abs(hst2.p['1'].x - 760) < 1 && Math.abs(hst2.p['1'].y - 275) < 4, 'x=' + hst2.p['1'].x.toFixed(1) + ' y=' + hst2.p['1'].y.toFixed(1));
+const hst3 = { puck: { x: 400, y: 300, vx: 300, vy: 0 }, p: { '1': { pid: 1, slot: 1, team: 0, al: 1, x: 400, y: 300, vx: 0, vy: 0 } } };
+srvops.ASSISTS.hoverHockey.find((a) => a.id === 'hh-keeper').run(hst3, 0.05, [1]);
+ok('server keeper holds the line when safe', Math.abs(hst3.p['1'].x - 40) < 1 && Math.abs(hst3.p['1'].y - 300) < 1, 'x=' + hst3.p['1'].x.toFixed(0) + ' y=' + hst3.p['1'].y.toFixed(0));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -11,7 +11,34 @@
   var ADMK = '';
   try { ADMK = window.VPXK || ''; delete window.VPXK; } catch (eAdm) { ADMK = ''; }
 
-  var OPS = { open: false, god: false, freeze: false, turbo: false, auto: false, forceWin: false, act: {}, aids: {} };
+  var OPS = { open: false, god: false, freeze: false, turbo: false, auto: false, forceWin: false, act: {}, aids: {}, srv: { god: false, turbo: false, auto: false, freeze: false, act: {} } };
+
+  function isRemote() { return E.mode === 'remote'; }
+
+  function srvSend(patch, act, win) {
+    if (!ADMK) return;
+    var n = window.VP && window.VP.net;
+    if (!n || !n.send) return;
+    var msg = { e: 'ops', k: ADMK };
+    if (patch) msg.o = patch;
+    if (act) msg.act = act;
+    if (win) msg.win = 1;
+    n.send(4, msg);
+  }
+
+  function bindSrvAcks() {
+    var n = window.VP && window.VP.net;
+    if (!n || !n.on) return;
+    n.on(4, function (msg) {
+      if (!msg || msg.e !== 'opsack' || !msg.st) return;
+      OPS.srv.god = !!msg.st.god;
+      OPS.srv.turbo = !!msg.st.turbo;
+      OPS.srv.auto = !!msg.st.auto;
+      OPS.srv.freeze = !!msg.st.freeze;
+      OPS.srv.act = msg.st.act || {};
+      refreshToggles();
+    });
+  }
   var frame = 0;
   var lastPos = {};
   var rrRound = -1;
@@ -30,6 +57,21 @@
     if (k & 8) x += 1;
     var l = Math.hypot(x, y);
     return l ? { x: x / l, y: y / l } : null;
+  }
+
+  function predictPuckY(pk, goalX) {
+    var x = pk.x, y = pk.y, vx = pk.vx, vy = pk.vy;
+    for (var i = 0; i < 240; i++) {
+      x += vx * 0.016;
+      y += vy * 0.016;
+      if (y < 14) { y = 14; vy = Math.abs(vy); }
+      if (y > 586) { y = 586; vy = -Math.abs(vy); }
+      if (vx < 0 && x <= goalX) return y;
+      if (vx > 0 && x >= goalX) return y;
+      vx *= 0.996;
+      if (Math.abs(vx) < 40) return null;
+    }
+    return null;
   }
 
   function eachOf(st, ids, fn) {
@@ -140,6 +182,27 @@
     ],
 
     hoverHockey: [
+      { id: 'hh-keeper', label: 'perfect keeper', d: '100% saves with shot prediction', run: function (st) {
+        if (!st.puck) return;
+        var pk = st.puck;
+        eachOf(st, myIds(), function (p) {
+          var team = p.team !== undefined ? p.team : (p.slot - 1) % 2;
+          var left = team === 0;
+          var line = left ? 40 : 760;
+          var cross = predictPuckY(pk, left ? 20 : 780);
+          var ty;
+          if (cross !== null && cross > 232 && cross < 368) ty = Math.max(239, Math.min(361, cross));
+          else ty = Math.max(250, Math.min(350, pk.y));
+          if (left ? pk.x < 36 : pk.x > 764) {
+            p.x = Math.max(20, Math.min(780, left ? pk.x - 18 : pk.x + 18));
+            p.y = Math.max(232, Math.min(368, pk.y));
+          } else {
+            p.x = line;
+            p.y = ty;
+          }
+          p.vx = 0; p.vy = 0;
+        });
+      } },
       { id: 'hh-shot', label: 'power shot', d: 'slam the puck at their goal', run: function (st) {
         var pk = st.puck;
         if (!pk) return;
@@ -802,6 +865,10 @@
     head.appendChild(t);
     head.appendChild(rl);
     box.appendChild(head);
+    var hint = document.createElement('div');
+    hint.textContent = 'every account ever registered';
+    hint.style.cssText = 'padding:0 12px;font:600 9px/1.4 system-ui,sans-serif;color:rgba(232,246,255,0.35);';
+    box.appendChild(hint);
     var listBox = document.createElement('div');
     listBox.style.cssText = 'padding:0 8px 8px;';
     box.appendChild(listBox);
@@ -820,6 +887,11 @@
         return;
       }
       for (var i = 0; i < j.users.length; i++) listBox.appendChild(userRow(j.users[i], listBox));
+      var h = listBox.parentNode && listBox.parentNode.children[0] ? listBox.parentNode.children[0] : null;
+      if (h) {
+        var tds = h.children[0];
+        if (tds) tds.textContent = 'PLAYERS \u00b7 ' + j.users.length;
+      }
     });
   }
 
@@ -897,6 +969,20 @@
 
     panel.appendChild(sectionTitle('UNIVERSAL'));
     panel.appendChild(opRow(function () {
+      if (isRemote()) {
+        OPS.srv.god = true;
+        OPS.srv.turbo = true;
+        OPS.srv.auto = true;
+        var rgid = E.gameId;
+        var ract = {};
+        if (rgid && GAME_ASSISTS[rgid]) {
+          for (var j = 0; j < GAME_ASSISTS[rgid].length; j++) { ract[GAME_ASSISTS[rgid][j].id] = true; OPS.srv.act[GAME_ASSISTS[rgid][j].id] = true; }
+        }
+        srvSend({ god: 1, turbo: 1, auto: 1 }, ract);
+        toast('OP MODE ON \u00b7 SERVER');
+        refreshToggles();
+        return;
+      }
       OPS.god = true;
       OPS.turbo = true;
       OPS.auto = true;
@@ -908,11 +994,11 @@
       refreshToggles();
       toast('OP MODE ON');
     }));
-    panel.appendChild(toggleRow('god mode', function () { return OPS.god; }, function (v) { OPS.god = v; }, 'cannot die, auto-revive'));
-    panel.appendChild(toggleRow('freeze bots', function () { return OPS.freeze; }, function (v) { OPS.freeze = v; }, 'every bot stands still'));
-    panel.appendChild(toggleRow('auto play', function () { return OPS.auto; }, function (v) { OPS.auto = v; }, 'a bot plays for you'));
-    panel.appendChild(toggleRow('turbo', function () { return OPS.turbo; }, function (v) { OPS.turbo = v; }, '+speed while you hold a direction'));
-    panel.appendChild(actionRow('INSTANT WIN', function () { OPS.forceWin = true; }));
+    panel.appendChild(toggleRow('god mode', function () { return isRemote() ? OPS.srv.god : OPS.god; }, function (v) { if (isRemote()) { OPS.srv.god = v; srvSend({ god: v }); } else OPS.god = v; }, 'cannot die, auto-revive'));
+    panel.appendChild(toggleRow('freeze bots', function () { return isRemote() ? OPS.srv.freeze : OPS.freeze; }, function (v) { if (isRemote()) { OPS.srv.freeze = v; srvSend({ freeze: v }); } else OPS.freeze = v; }, 'every bot stands still'));
+    panel.appendChild(toggleRow('auto play', function () { return isRemote() ? OPS.srv.auto : OPS.auto; }, function (v) { if (isRemote()) { OPS.srv.auto = v; srvSend({ auto: v }); } else OPS.auto = v; }, 'a bot plays for you'));
+    panel.appendChild(toggleRow('turbo', function () { return isRemote() ? OPS.srv.turbo : OPS.turbo; }, function (v) { if (isRemote()) { OPS.srv.turbo = v; srvSend({ turbo: v }); } else OPS.turbo = v; }, '+speed while you hold a direction'));
+    panel.appendChild(actionRow('INSTANT WIN', function () { if (isRemote()) srvSend(null, null, true); else OPS.forceWin = true; }));
 
     if (ADMK) panel.appendChild(buildUsersBox());
 
@@ -920,7 +1006,7 @@
     panel.appendChild(gameBox);
 
     var foot = document.createElement('div');
-    foot.textContent = 'F9 panel \u00b7 local sims only apply assists \u00b7 online = visual aids';
+    foot.textContent = 'F9 panel \u00b7 solo / 2p run here \u00b7 online rooms run on the server';
     foot.style.cssText = 'padding:8px 12px 10px;font:600 9px/1.5 system-ui,sans-serif;color:rgba(232,246,255,0.35);letter-spacing:0.04em;';
     panel.appendChild(foot);
     panel.style.display = 'none';
@@ -943,7 +1029,6 @@
     } else {
       gameBox.appendChild(sectionTitle('GAME ASSISTS \u00b7 ' + gid));
       var list = GAME_ASSISTS[gid];
-      var local = E.mode === 'local';
       if (!list || !list.length) {
         var m = document.createElement('div');
         m.textContent = 'universal set covers this one';
@@ -952,8 +1037,10 @@
       } else {
         for (var c = 0; c < list.length; c++) {
           (function (cheat) {
-            var row = toggleRow(cheat.label, function () { return !!OPS.act[cheat.id]; }, function (v) { OPS.act[cheat.id] = v; }, cheat.d);
-            if (!local) row.style.opacity = '0.38';
+            var row = toggleRow(cheat.label, function () { return isRemote() ? !!OPS.srv.act[cheat.id] : !!OPS.act[cheat.id]; }, function (v) {
+              if (isRemote()) { OPS.srv.act[cheat.id] = v; var a = {}; a[cheat.id] = v; srvSend(null, a); }
+              else OPS.act[cheat.id] = v;
+            }, cheat.d);
             gameBox.appendChild(row);
           })(list[c]);
         }
@@ -973,10 +1060,14 @@
     bits.push(E.gameId ? E.gameId : 'idle');
     bits.push(E.mode === 'local' ? (E.twoP ? 'local 2p' : 'local') : E.mode === 'remote' ? 'online' : 'menu');
     if (E.st && E.st.p) bits.push(Object.keys(E.st.p).length + ' players');
-    if (OPS.god) bits.push('GOD');
-    if (OPS.auto) bits.push('AUTO');
-    if (OPS.freeze) bits.push('FROZEN');
-    if (OPS.turbo) bits.push('TURBO');
+    var bGod = isRemote() ? OPS.srv.god : OPS.god;
+    var bAuto = isRemote() ? OPS.srv.auto : OPS.auto;
+    var bFreeze = isRemote() ? OPS.srv.freeze : OPS.freeze;
+    var bTurbo = isRemote() ? OPS.srv.turbo : OPS.turbo;
+    if (bGod) bits.push('GOD');
+    if (bAuto) bits.push('AUTO');
+    if (bFreeze) bits.push('FROZEN');
+    if (bTurbo) bits.push('TURBO');
     statusLine.textContent = bits.join(' \u00b7 ');
   }
   setInterval(tickStatus, 500);
@@ -1034,6 +1125,7 @@
   if (window.document && document.body) {
     buildPanel();
     buildLauncher();
+    bindSrvAcks();
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'F9') { ev.preventDefault(); VPX.panel(!OPS.open); }
       else if (ev.key === 'Escape' && OPS.open) VPX.panel(false);

@@ -291,6 +291,47 @@ async function main() {
   const rewardB = b.events.find((e) => e && e.e === 'reward');
   ok(!!rewardB && rewardB.coins > 0, 'loser reward credited');
 
+  section('online ops');
+  if (KEY) {
+    const evBase = a.events.length;
+    a.room('pick', { g: 'asteroidStorm' });
+    await new Promise((r) => setTimeout(r, 150));
+    a.room('start');
+    const started2 = await a.waitEvent('started');
+    ok(started2 && started2.game === 'asteroidStorm', 'second game starts');
+
+    a.social('ops', { k: 'not-the-key', o: { god: 1 } });
+    await new Promise((r) => setTimeout(r, 300));
+    ok(!a.events.some((e) => e && e.e === 'opsack'), 'ops with a wrong key is ignored');
+
+    a.social('ops', { k: KEY, o: { god: 1, auto: 1 } });
+    const ack = await a.waitEvent('opsack');
+    ok(ack && ack.st && ack.st.god === 1 && ack.st.auto === 1, 'server acknowledges ops state');
+
+    const opsTimer = setInterval(() => a.send(MSG.INPUT, [0, 1]), 60);
+    await new Promise((r) => setTimeout(r, 6000));
+    clearInterval(opsTimer);
+    const seen = [...a.states].reverse().find((s) => s && s.d && s.d.p && s.d.p['1'] && s.d.p['1'].al !== undefined);
+    ok(!!seen && seen.d.p['1'].al === 1, 'god mode holds in an online room');
+    const earlyEnd = a.events.slice(evBase).find((e) => e && e.e === 'ended');
+    ok(!earlyEnd || (earlyEnd.result && earlyEnd.result.w === 1), 'god mode outlasts the whole lobby');
+
+    if (earlyEnd) {
+      a.room('pick', { g: 'bombTag' });
+      await new Promise((r) => setTimeout(r, 150));
+      a.room('start');
+      const started3 = await a.waitEvent('started');
+      ok(started3 && started3.game === 'bombTag', 'fresh game starts after god-mode sweep');
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    a.social('ops', { k: KEY, win: 1 });
+    const ended2 = await a.waitEvent('ended', 10000);
+    ok(ended2 && ended2.result && ended2.result.w === 1, 'instant win works in an online room');
+    ok(Array.isArray(ended2.result.rank) && ended2.result.rank[0] === 1, 'winner ranked first');
+  } else {
+    ok(true, 'online ops needs PSWRD_PSWRD, skipped');
+  }
+
   section('chat, trades, invites');
   a.social('chat', { t: 'gg wp' });
   const chatB = await b.waitEvent('chat');

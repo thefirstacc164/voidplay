@@ -5,6 +5,7 @@ const registry = require('./games');
 const accounts = require('./accounts');
 const items = require('../shared/items');
 const vault = require('./vault');
+const srvops = require('./ops');
 
 const TICK_MS = 50;
 const MAX_PLAYERS = 4;
@@ -256,9 +257,20 @@ class Room {
     const game = registry.registry[this.gameType];
     if (!game || !this.gameState) { this.stopGame(); return; }
     try {
+      const opConns = srvops.activeConns(this.players);
+      const anyFreeze = opConns.some((c) => c.ops.freeze);
+      srvops.preBots(this.gameState, opConns);
       game.bots(this.gameState);
+      srvops.postBots(this.gameState, opConns, anyFreeze);
       game.tick(this.gameState, TICK_MS);
-      const win = game.checkWin(this.gameState);
+      srvops.afterTick(this.gameState, game, this.gameType, opConns, TICK_MS, (pid, k) => {
+        game.onInput(this.gameState, pid, { k });
+      });
+      let win = srvops.forcedWin(this.gameState, opConns);
+      if (!win) {
+        srvops.revive(this.gameState, game, opConns);
+        win = game.checkWin(this.gameState);
+      }
       this.sendDeltaState();
       if (win) this.endGame(win);
     } catch (err) {
