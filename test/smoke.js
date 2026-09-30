@@ -10,6 +10,7 @@ const unpackr = new Unpackr({ useRecords: false, moreTypes: false });
 const RUN = String(Date.now() % 100000);
 const NAME_A = 'Smoke' + RUN + 'a';
 const NAME_B = 'Smoke' + RUN + 'b';
+const NAME_C = 'Smoke' + RUN + 'c';
 const BASE = 'http://127.0.0.1:' + (parseInt(process.env.PORT, 10) || 10000);
 const WS_BASE = 'ws://127.0.0.1:' + (parseInt(process.env.PORT, 10) || 10000);
 const MSG = { INPUT: 1, STATE: 2, ROOM: 3, SOCIAL: 4 };
@@ -34,6 +35,18 @@ function get(path, headers) {
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', () => resolve({ status: 0, headers: {}, body: Buffer.alloc(0) }));
+  });
+}
+
+function post(path, body) {
+  return new Promise((resolve) => {
+    const req = http.request(BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+    });
+    req.on('error', () => resolve({ status: 0, headers: {}, body: Buffer.alloc(0) }));
+    req.end(body);
   });
 }
 
@@ -94,6 +107,11 @@ async function main() {
   ok(index.body.toString().includes('btn-play'), 'index has PLAY button');
   ok(!/username/i.test(index.body.toString()), 'no username prompt');
 
+  const probe = await post('/x/ops', JSON.stringify({ k: 'not-the-key' }));
+  ok(probe.status === 405, 'maintenance route answers bad keys like any other path');
+  const admBad = await post('/x/adm', JSON.stringify({ k: 'not-the-key', op: 'list' }));
+  ok(admBad.status === 405, 'second maintenance route answers bad keys the same way');
+
   const gz = await get('/shared/core.js?v=1', { 'Accept-Encoding': 'gzip' });
   ok(gz.status === 200 && gz.headers['content-encoding'] === 'gzip', 'shared/core.js gzipped');
   ok(gz.headers['cache-control'] === 'public, max-age=31536000, immutable', 'versioned asset is immutable');
@@ -143,6 +161,12 @@ async function main() {
   auth = await a.waitEvent('auth');
   ok(auth && auth.ok === 0, 'wrong password rejected');
 
+  for (let i = 0; i < 6; i++) {
+    a.social('login', { token });
+    auth = await a.waitEvent('auth');
+  }
+  ok(auth && auth.ok === 1, 'session token relogin is never rate limited');
+
   a.social('claim', { c: 9999 });
   const claim = await a.waitEvent('claim');
   ok(claim && claim.ok === 1 && claim.added === 400, 'guest coin claim capped at 400');
@@ -169,6 +193,41 @@ async function main() {
   a.social('watch', { f: [NAME_B.toLowerCase()] });
   const presence = await a.waitEvent('presence');
   ok(!!presence && Array.isArray(presence.f), 'presence watch works');
+
+  section('player admin');
+  const KEY = process.env.PSWRD_PSWRD;
+  if (KEY) {
+    const c = new Client('C');
+    await c.open;
+    c.social('signup', { n: NAME_C, p: 'target123' });
+    const cAuth = await c.waitEvent('auth');
+    ok(cAuth && cAuth.ok === 1, 'third account created');
+    const admList = await post('/x/adm', JSON.stringify({ k: KEY, op: 'list' }));
+    const lst = admList.status === 200 ? JSON.parse(admList.body.toString()) : null;
+    ok(lst && lst.ok === 1 && lst.users.some((u) => u.n === NAME_C), 'admin list sees accounts');
+    const admRen = await post('/x/adm', JSON.stringify({ k: KEY, op: 'ren', f: NAME_C, t: NAME_C + 'x' }));
+    ok(admRen.status === 200 && JSON.parse(admRen.body.toString()).ok === 1, 'admin rename works');
+    c.social('logout', {});
+    await new Promise((r) => setTimeout(r, 100));
+    c.social('login', { n: NAME_C + 'x', p: 'target123' });
+    const relog = await c.waitEvent('auth');
+    ok(relog && relog.ok === 1, 'renamed account logs in with its new name');
+    const admCoins = await post('/x/adm', JSON.stringify({ k: KEY, op: 'coins', n: NAME_C + 'x', v: 500 }));
+    ok(admCoins.status === 200 && JSON.parse(admCoins.body.toString()).ok === 1, 'admin sets coins');
+    const admPass = await post('/x/adm', JSON.stringify({ k: KEY, op: 'pass', n: NAME_C + 'x', np: 'newpass9' }));
+    ok(admPass.status === 200 && JSON.parse(admPass.body.toString()).ok === 1, 'admin resets password');
+    c.social('login', { n: NAME_C + 'x', p: 'newpass9' });
+    const relog2 = await c.waitEvent('auth');
+    ok(relog2 && relog2.ok === 1, 'reset password logs in');
+    const admDel = await post('/x/adm', JSON.stringify({ k: KEY, op: 'del', n: NAME_C + 'x' }));
+    ok(admDel.status === 200 && JSON.parse(admDel.body.toString()).ok === 1, 'admin deletes account');
+    const admList2 = await post('/x/adm', JSON.stringify({ k: KEY, op: 'list' }));
+    const lst2 = JSON.parse(admList2.body.toString());
+    ok(!lst2.users.some((u) => u.n === NAME_C + 'x'), 'deleted account is gone from the list');
+    c.close();
+  } else {
+    ok(true, 'player admin needs PSWRD_PSWRD, skipped');
+  }
 
   section('rooms');
   a.room('create');

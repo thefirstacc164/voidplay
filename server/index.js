@@ -86,18 +86,29 @@ function readBody(req, cap) {
   });
 }
 
+function keyMatches(key) {
+  if (!opsKeyHash) return false;
+  const hash = key ? crypto.createHash('sha256').update(String(key).trim()).digest() : null;
+  return !!hash && hash.length === opsKeyHash.length &&
+    crypto.timingSafeEqual(hash, opsKeyHash);
+}
+
 async function handleOps(req, res, ip) {
-  if (!opsBundle || !opsKeyHash) return notAllowed(res);
+  if (!opsBundle || !opsKeyHash) {
+    res.writeHead(503, { 'Content-Type': 'text/plain' });
+    return res.end('Service unavailable');
+  }
   const rec = opsFails.get(ip);
-  if (rec && rec.lockedUntil > Date.now()) return notAllowed(res);
+  if (rec && rec.lockedUntil > Date.now()) {
+    const wait = Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000));
+    res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(wait) });
+    return res.end('Too many requests');
+  }
   const raw = await readBody(req, 4096);
   if (!raw) return notFound(res);
   let key = null;
   try { key = JSON.parse(raw.toString('utf8')).k; } catch (err) { key = null; }
-  const hash = key ? crypto.createHash('sha256').update(String(key).trim()).digest() : null;
-  const ok = hash && hash.length === opsKeyHash.length &&
-    crypto.timingSafeEqual(hash, opsKeyHash);
-  if (!ok) {
+  if (!keyMatches(key)) {
     const n = (rec ? rec.fails : 0) + 1;
     opsFails.set(ip, { fails: n, lockedUntil: n >= OPS_MAX_FAILS ? Date.now() + OPS_LOCK_MS : 0 });
     if (opsFails.size > 5000) opsFails.clear();
@@ -111,6 +122,44 @@ async function handleOps(req, res, ip) {
     'Content-Length': opsBundle.length,
   });
   res.end(req.method === 'HEAD' ? undefined : opsBundle);
+}
+
+async function handleAdm(req, res, ip) {
+  if (!opsKeyHash) {
+    res.writeHead(503, { 'Content-Type': 'text/plain' });
+    return res.end('Service unavailable');
+  }
+  const rec = opsFails.get(ip);
+  if (rec && rec.lockedUntil > Date.now()) {
+    const wait = Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 1000));
+    res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(wait) });
+    return res.end('Too many requests');
+  }
+  const raw = await readBody(req, 16384);
+  if (!raw) return notFound(res);
+  let p = null;
+  try { p = JSON.parse(raw.toString('utf8')); } catch (err) { p = null; }
+  if (!keyMatches(p && p.k)) {
+    const n = (rec ? rec.fails : 0) + 1;
+    opsFails.set(ip, { fails: n, lockedUntil: n >= OPS_MAX_FAILS ? Date.now() + OPS_LOCK_MS : 0 });
+    if (opsFails.size > 5000) opsFails.clear();
+    return notAllowed(res);
+  }
+  opsFails.set(ip, { fails: 0, lockedUntil: 0 });
+  let reply;
+  try {
+    reply = await accounts.admin(p.op, p);
+  } catch (err) {
+    reply = { ok: 0, msg: 'Server error' };
+  }
+  const body = JSON.stringify(reply);
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
 }
 
 function acceptsGzip(req) {
@@ -153,6 +202,10 @@ const server = http.createServer((req, res) => {
     try { opPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch (err) { opPath = null; }
     if (opPath === '/x/ops') {
       handleOps(req, res, ip).catch(() => { try { notAllowed(res); } catch (err) {} });
+      return;
+    }
+    if (opPath === '/x/adm') {
+      handleAdm(req, res, ip).catch(() => { try { notAllowed(res); } catch (err) {} });
       return;
     }
   }
@@ -227,8 +280,16 @@ function presenceRename(conn, name) {
 
 function handleSocial(conn, p) {
   switch (p.e) {
-    case 'signup': applyAuth(conn, accounts.signup(conn, p.n, p.p)); break;
-    case 'login': applyAuth(conn, accounts.login(conn, p.n, p.p, p.token)); break;
+    case 'signup':
+      accounts.signup(conn, p.n, p.p)
+        .then((reply) => applyAuth(conn, reply))
+        .catch(() => net.send(conn.ws, net.MSG.SOCIAL, { e: 'auth', ok: 0, msg: 'Server busy, try again' }));
+      break;
+    case 'login':
+      accounts.login(conn, p.n, p.p, p.token)
+        .then((reply) => applyAuth(conn, reply))
+        .catch(() => net.send(conn.ws, net.MSG.SOCIAL, { e: 'auth', ok: 0, msg: 'Server busy, try again' }));
+      break;
     case 'logout': {
       const reply = accounts.logout(conn);
       presenceRename(conn, conn.name);
@@ -291,7 +352,7 @@ wss.on('connection', (ws) => {
   };
   conn.name = accounts.guestName(conn);
   rooms.presence.register(conn, conn.name);
-  net.send(ws, net.MSG.SOCIAL, { e: 'hello', name: conn.name });
+  net.send(ws, net.MSG.SOCIAL, { e: 'hello', name: conn.name, durable: vault.remote ? 1 : 0 });
   ws.on('message', (data, isBinary) => {
     if (!isBinary) return;
     try {

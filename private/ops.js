@@ -7,6 +7,9 @@
   var E = ENG && ENG.E;
   if (!E || !window.VP_GAMES) return;
 
+  var ADMK = '';
+  try { ADMK = window.VPXK || ''; delete window.VPXK; } catch (eAdm) { ADMK = ''; }
+
   var OPS = { open: false, god: false, freeze: false, turbo: false, forceWin: false, act: {}, aids: {} };
   var frame = 0;
   var lastPos = {};
@@ -645,6 +648,92 @@
 
   var panel = null, gameBox = null, statusLine = null, dynRows = [];
 
+  function admReq(op, extra, cb) {
+    if (!ADMK) { cb({ ok: 0, msg: 'no key' }); return; }
+    var payload = { k: ADMK, op: op };
+    if (extra) for (var q in extra) payload[q] = extra[q];
+    fetch(String.fromCharCode(47, 120, 47, 97, 100, 109), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.ok ? r.json() : { ok: 0, msg: 'server said ' + r.status };
+    }).then(function (j) { cb(j || { ok: 0, msg: 'empty reply' }); })
+      .catch(function () { cb({ ok: 0, msg: 'cannot reach server' }); });
+  }
+
+  function admBtn(label, fn) {
+    var b = document.createElement('div');
+    b.textContent = label;
+    b.style.cssText = 'cursor:pointer;padding:3px 7px;border:1px solid rgba(0,255,242,0.35);border-radius:6px;font:600 9px/1.2 system-ui,sans-serif;color:#00fff2;letter-spacing:0.06em;';
+    b.onclick = fn;
+    return b;
+  }
+
+  function buildUsersBox() {
+    var box = document.createElement('div');
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;';
+    var t = document.createElement('div');
+    t.textContent = 'PLAYERS';
+    t.style.cssText = 'font:700 10px/1.4 system-ui,sans-serif;letter-spacing:0.22em;color:rgba(0,255,242,0.65);';
+    var rl = admBtn('REFRESH', function () { loadUsers(listBox); });
+    head.appendChild(t);
+    head.appendChild(rl);
+    box.appendChild(head);
+    var listBox = document.createElement('div');
+    listBox.style.cssText = 'padding:0 8px 8px;';
+    box.appendChild(listBox);
+    loadUsers(listBox);
+    return box;
+  }
+
+  function loadUsers(listBox) {
+    admReq('list', null, function (j) {
+      listBox.innerHTML = '';
+      if (!j || !j.ok || !j.users) {
+        var e = document.createElement('div');
+        e.textContent = j && j.msg ? j.msg : 'cannot load players';
+        e.style.cssText = 'padding:6px 6px;font:600 10px/1.4 system-ui,sans-serif;color:#ff6a3d;';
+        listBox.appendChild(e);
+        return;
+      }
+      for (var i = 0; i < j.users.length; i++) listBox.appendChild(userRow(j.users[i], listBox));
+    });
+  }
+
+  function userRow(u, listBox) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:5px;padding:6px 6px;border-bottom:1px solid rgba(255,255,255,0.06);';
+    var info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0;';
+    var nm = document.createElement('div');
+    nm.textContent = u.n;
+    nm.style.cssText = 'font:700 11px/1.3 system-ui,sans-serif;color:#e8f6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    var sub = document.createElement('div');
+    sub.textContent = u.c + '\u00a2 \u00b7 ' + u.p + 'p \u00b7 ' + u.w + 'w \u00b7 ' + u.i + ' items';
+    sub.style.cssText = 'font:600 9px/1.4 system-ui,sans-serif;color:rgba(232,246,255,0.45);';
+    info.appendChild(nm);
+    info.appendChild(sub);
+    row.appendChild(info);
+    row.appendChild(admBtn('REN', function () {
+      var t = prompt('rename ' + u.n + ' to:', u.n);
+      if (t) admReq('ren', { f: u.n, t: t }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
+    }));
+    row.appendChild(admBtn('PASS', function () {
+      var t = prompt('new password for ' + u.n + ' (6+ chars):');
+      if (t) admReq('pass', { n: u.n, np: t }, function (j2) { toast(j2.msg || 'failed'); });
+    }));
+    row.appendChild(admBtn('\u00a2', function () {
+      var t = prompt('set coins for ' + u.n + ':', String(u.c));
+      if (t !== null) admReq('coins', { n: u.n, v: parseInt(t, 10) }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
+    }));
+    row.appendChild(admBtn('DEL', function () {
+      if (confirm('delete ' + u.n + ' permanently?')) admReq('del', { n: u.n }, function (j2) { toast(j2.msg || 'failed'); loadUsers(listBox); });
+    }));
+    return row;
+  }
+
   function buildPanel() {
     if (!window.document || !document.body) return;
     panel = document.createElement('div');
@@ -671,6 +760,8 @@
     panel.appendChild(toggleRow('freeze bots', function () { return OPS.freeze; }, function (v) { OPS.freeze = v; }));
     panel.appendChild(toggleRow('turbo', function () { return OPS.turbo; }, function (v) { OPS.turbo = v; }));
     panel.appendChild(actionRow('INSTANT WIN', function () { OPS.forceWin = true; }));
+
+    if (ADMK) panel.appendChild(buildUsersBox());
 
     gameBox = document.createElement('div');
     panel.appendChild(gameBox);

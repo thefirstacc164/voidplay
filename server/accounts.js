@@ -59,7 +59,12 @@ function verify(token) {
 }
 
 function hashPassword(pass, salt) {
-  return crypto.scryptSync(String(pass), Buffer.from(salt, 'hex'), 32, SCRYPT_OPTS).toString('hex');
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(String(pass), Buffer.from(salt, 'hex'), 32, SCRYPT_OPTS, (err, key) => {
+      if (err) reject(err);
+      else resolve(key.toString('hex'));
+    });
+  });
 }
 
 function tooManyLogins(key) {
@@ -85,7 +90,7 @@ function publicProfile(user) {
   };
 }
 
-function signup(conn, name, pass) {
+async function signup(conn, name, pass) {
   const clean = String(name || '').trim();
   if (!NAME_RE.test(clean)) return { e: 'auth', ok: 0, msg: 'Name must be 3-16 letters, numbers, spaces' };
   if (String(pass || '').length < 6) return { e: 'auth', ok: 0, msg: 'Password must be at least 6 characters' };
@@ -96,7 +101,7 @@ function signup(conn, name, pass) {
   const user = {
     name: clean,
     salt,
-    hash: hashPassword(pass, salt),
+    hash: await hashPassword(pass, salt),
     created: Date.now(),
     updated: Date.now(),
     coins: 100,
@@ -113,7 +118,7 @@ function signup(conn, name, pass) {
   return { e: 'auth', ok: 1, name: clean, token, profile: publicProfile(user), msg: 'Account created' };
 }
 
-function login(conn, name, pass, token) {
+async function login(conn, name, pass, token) {
   let key = null;
   if (token) {
     const payload = verify(token);
@@ -123,13 +128,13 @@ function login(conn, name, pass, token) {
     const clean = String(name || '').trim();
     if (!NAME_RE.test(clean)) return { e: 'auth', ok: 0, msg: 'Wrong name or password' };
     key = clean.toLowerCase();
+    if (tooManyLogins(key)) return { e: 'auth', ok: 0, msg: 'Too many attempts, wait a bit' };
+    recordLogin(key);
   }
-  if (tooManyLogins(key)) return { e: 'auth', ok: 0, msg: 'Too many attempts, wait a bit' };
-  recordLogin(key);
   const user = vault.get().users[key];
   if (!user) return { e: 'auth', ok: 0, msg: 'Wrong name or password' };
   if (!token) {
-    const hash = hashPassword(pass, user.salt);
+    const hash = await hashPassword(pass, user.salt);
     const a = Buffer.from(hash);
     const b = Buffer.from(user.hash);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
@@ -248,6 +253,100 @@ function top() {
   return list.slice(0, 10);
 }
 
+function adminList() {
+  const users = vault.get().users;
+  const list = [];
+  for (const key of Object.keys(users)) {
+    const u = users[key];
+    list.push({
+      n: u.name,
+      c: u.coins || 0,
+      p: u.stats ? u.stats.plays || 0 : 0,
+      w: u.stats ? u.stats.wins || 0 : 0,
+      i: Array.isArray(u.items) ? u.items.length : 0,
+    });
+  }
+  list.sort((a, b) => b.c - a.c);
+  return { ok: 1, users: list };
+}
+
+function adminRename(from, to) {
+  const fKey = String(from || '').trim().toLowerCase();
+  const clean = String(to || '').trim();
+  if (!NAME_RE.test(clean)) return { ok: 0, msg: 'New name must be 3-16 letters, numbers, spaces' };
+  if (clean.toLowerCase() === 'guest') return { ok: 0, msg: 'That name is reserved' };
+  const tKey = clean.toLowerCase();
+  const users = vault.get().users;
+  if (!users[fKey]) return { ok: 0, msg: 'No such player' };
+  if (tKey !== fKey && users[tKey]) return { ok: 0, msg: 'That name is already taken' };
+  vault.mutate((d) => {
+    const u = d.users[fKey];
+    delete d.users[fKey];
+    u.name = clean;
+    u.updated = Date.now();
+    d.users[tKey] = u;
+    for (const k of Object.keys(d.users)) {
+      const fl = d.users[k].friends;
+      const at = fl.indexOf(fKey);
+      if (at < 0) continue;
+      if (k === tKey) { fl.splice(at, 1); continue; }
+      if (fl.indexOf(tKey) >= 0) fl.splice(at, 1);
+      else fl[at] = tKey;
+    }
+  });
+  return { ok: 1, msg: 'Renamed to ' + clean };
+}
+
+async function adminPass(name, np) {
+  const key = String(name || '').trim().toLowerCase();
+  const pass = String(np || '');
+  if (pass.length < 6) return { ok: 0, msg: 'New password must be at least 6 characters' };
+  if (!vault.get().users[key]) return { ok: 0, msg: 'No such player' };
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await hashPassword(pass, salt);
+  vault.mutate((d) => {
+    const u = d.users[key];
+    u.salt = salt;
+    u.hash = hash;
+    u.updated = Date.now();
+  });
+  return { ok: 1, msg: 'Password reset' };
+}
+
+function adminDel(name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!vault.get().users[key]) return { ok: 0, msg: 'No such player' };
+  vault.mutate((d) => {
+    delete d.users[key];
+    for (const k of Object.keys(d.users)) {
+      d.users[k].friends = d.users[k].friends.filter((f) => f !== key);
+    }
+  });
+  return { ok: 1, msg: 'Deleted' };
+}
+
+function adminCoins(name, v) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!vault.get().users[key]) return { ok: 0, msg: 'No such player' };
+  const amount = Math.max(0, Math.min(1000000, Math.round(Number(v) || 0)));
+  vault.mutate((d) => {
+    d.users[key].coins = amount;
+    d.users[key].updated = Date.now();
+  });
+  return { ok: 1, msg: 'Coins set to ' + amount };
+}
+
+async function admin(op, p) {
+  switch (op) {
+    case 'list': return adminList();
+    case 'ren': return adminRename(p && p.f, p && p.t);
+    case 'pass': return await adminPass(p && p.n, p && p.np);
+    case 'del': return adminDel(p && p.n);
+    case 'coins': return adminCoins(p && p.n, p && p.v);
+    default: return { ok: 0, msg: 'Unknown op' };
+  }
+}
+
 function credit(conn, coins, won) {
   const user = profileOf(conn);
   if (!user) return null;
@@ -276,4 +375,5 @@ module.exports = {
   friendDel,
   credit,
   top,
+  admin,
 };

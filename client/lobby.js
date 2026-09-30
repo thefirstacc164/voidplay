@@ -142,6 +142,12 @@
     } else {
       authbox.classList.remove('hidden');
       panel.classList.add('hidden');
+      var note = document.querySelector('.auth-note');
+      if (note) {
+        note.textContent = state.durable === false
+          ? 'Accounts are optional. Heads up: storage is in temporary mode, so accounts reset when the server restarts.'
+          : 'Accounts are optional. Guests keep their coins on this device and can merge them when they log in.';
+      }
     }
     coinDisplay();
     nameDisplay();
@@ -608,6 +614,7 @@
     $('btn-lib-back').onclick = function () { snd('back'); show(state.room ? 'room' : 'title'); };
     $('btn-account').onclick = function () {
       $('auth-msg').textContent = '';
+      setAccountUi();
       openModal('modal-account');
     };
     document.querySelectorAll('.modal-close').forEach(function (b) {
@@ -621,6 +628,7 @@
     $('tab-signup').onclick = function () { authTab('signup'); };
     $('btn-auth-go').onclick = doAuth;
     $('auth-pass').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') doAuth(); });
+    $('auth-name').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') doAuth(); });
 
     $('btn-load-all').onclick = function () {
       state.loadMode = 'all';
@@ -760,6 +768,8 @@
   }
 
   var authMode = 'login';
+  var authBusy = false;
+  var authPending = null;
 
   function authTab(mode) {
     authMode = mode;
@@ -769,12 +779,32 @@
     $('auth-msg').textContent = '';
   }
 
+  function authBusyOff() {
+    authBusy = false;
+    $('btn-auth-go').textContent = authMode === 'login' ? 'LOG IN' : 'CREATE ACCOUNT';
+  }
+
+  function authSend(mode, n, p) {
+    authBusy = true;
+    $('btn-auth-go').textContent = '...';
+    $('auth-msg').textContent = '';
+    if (mode === 'login') net.send(4, { e: 'login', n: n, p: p });
+    else net.send(4, { e: 'signup', n: n, p: p });
+  }
+
   function doAuth() {
+    if (authBusy) return;
     var n = $('auth-name').value.trim();
     var p = $('auth-pass').value;
     if (!n || !p) { $('auth-msg').textContent = 'fill in both fields'; $('auth-msg').className = 'auth-msg bad'; return; }
-    if (authMode === 'login') net.send(4, { e: 'login', n: n, p: p });
-    else net.send(4, { e: 'signup', n: n, p: p });
+    if (!net.connected) {
+      authPending = { m: authMode, n: n, p: p };
+      $('auth-msg').textContent = 'connecting to server...';
+      $('auth-msg').className = 'auth-msg bad';
+      net.connect();
+      return;
+    }
+    authSend(authMode, n, p);
   }
 
   function onAuthOk(msg) {
@@ -870,12 +900,14 @@
     net.on(4, function (msg) {
       switch (msg.e) {
         case 'hello':
+          state.durable = msg.durable === 1;
           if (!state.authed) {
             state.name = msg.name;
             nameDisplay();
           }
           break;
         case 'auth':
+          authBusyOff();
           if (msg.ok) onAuthOk(msg);
           else {
             $('auth-msg').textContent = msg.msg || 'failed';
@@ -948,7 +980,11 @@
 
     net.on('open', function () {
       $('conn-status').textContent = 'ONLINE';
-      if (state.token) net.send(4, { e: 'login', token: state.token });
+      if (authPending) {
+        var q = authPending;
+        authPending = null;
+        authSend(q.m, q.n, q.p);
+      } else if (state.token) net.send(4, { e: 'login', token: state.token });
       sendWatch();
       if (state.lastRoomCode) {
         var code = state.lastRoomCode;
@@ -957,6 +993,7 @@
       }
     });
     net.on('close', function () {
+      authBusyOff();
       $('conn-status').textContent = 'RECONNECTING…';
       state.room = null;
       if (VP.engine.E.mode === 'remote') {
