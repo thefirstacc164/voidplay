@@ -15,6 +15,63 @@
 
   function isRemote() { return E.mode === 'remote'; }
 
+  function setGod(v) {
+    v = !!v;
+    if (isRemote()) { OPS.srv.god = v; srvSend({ god: v }); }
+    else OPS.god = v;
+    return v;
+  }
+  function setFreeze(v) {
+    v = !!v;
+    if (isRemote()) { OPS.srv.freeze = v; srvSend({ freeze: v }); }
+    else OPS.freeze = v;
+    return v;
+  }
+  function setAuto(v) {
+    v = !!v;
+    if (isRemote()) { OPS.srv.auto = v; srvSend({ auto: v }); }
+    else OPS.auto = v;
+    return v;
+  }
+  function setTurbo(v) {
+    v = !!v;
+    if (isRemote()) { OPS.srv.turbo = v; srvSend({ turbo: v }); }
+    else OPS.turbo = v;
+    return v;
+  }
+  function setAct(id, v) {
+    v = !!v;
+    if (isRemote()) { OPS.srv.act[id] = v; var a = {}; a[id] = v; srvSend(null, a); }
+    else OPS.act[id] = v;
+    return v;
+  }
+  function instantWin() {
+    if (isRemote()) srvSend(null, null, true);
+    else OPS.forceWin = true;
+  }
+  function toggleAllOn() {
+    if (isRemote()) {
+      OPS.srv.god = true;
+      OPS.srv.turbo = true;
+      OPS.srv.auto = true;
+      var rgid = E.gameId;
+      var ract = {};
+      if (rgid && GAME_ASSISTS[rgid]) {
+        for (var j = 0; j < GAME_ASSISTS[rgid].length; j++) { ract[GAME_ASSISTS[rgid][j].id] = true; OPS.srv.act[GAME_ASSISTS[rgid][j].id] = true; }
+      }
+      srvSend({ god: true, turbo: true, auto: true }, ract);
+      return;
+    }
+    OPS.god = true;
+    OPS.turbo = true;
+    OPS.auto = true;
+    var gid = E.gameId;
+    if (gid && GAME_ASSISTS[gid]) {
+      for (var i = 0; i < GAME_ASSISTS[gid].length; i++) OPS.act[GAME_ASSISTS[gid][i].id] = true;
+      OPS.aids[gid] = true;
+    }
+  }
+
   function srvSend(patch, act, win) {
     if (!ADMK) return;
     var n = window.VP && window.VP.net;
@@ -35,7 +92,8 @@
       OPS.srv.turbo = !!msg.st.turbo;
       OPS.srv.auto = !!msg.st.auto;
       OPS.srv.freeze = !!msg.st.freeze;
-      OPS.srv.act = msg.st.act || {};
+      var ackAct = msg.st.act || {};
+      for (var ak in ackAct) OPS.srv.act[ak] = !!ackAct[ak];
       refreshToggles();
     });
   }
@@ -969,36 +1027,15 @@
 
     panel.appendChild(sectionTitle('UNIVERSAL'));
     panel.appendChild(opRow(function () {
-      if (isRemote()) {
-        OPS.srv.god = true;
-        OPS.srv.turbo = true;
-        OPS.srv.auto = true;
-        var rgid = E.gameId;
-        var ract = {};
-        if (rgid && GAME_ASSISTS[rgid]) {
-          for (var j = 0; j < GAME_ASSISTS[rgid].length; j++) { ract[GAME_ASSISTS[rgid][j].id] = true; OPS.srv.act[GAME_ASSISTS[rgid][j].id] = true; }
-        }
-        srvSend({ god: 1, turbo: 1, auto: 1 }, ract);
-        toast('OP MODE ON \u00b7 SERVER');
-        refreshToggles();
-        return;
-      }
-      OPS.god = true;
-      OPS.turbo = true;
-      OPS.auto = true;
-      var gid = E.gameId;
-      if (gid && GAME_ASSISTS[gid]) {
-        for (var i = 0; i < GAME_ASSISTS[gid].length; i++) OPS.act[GAME_ASSISTS[gid][i].id] = true;
-        OPS.aids[gid] = true;
-      }
+      toggleAllOn();
       refreshToggles();
-      toast('OP MODE ON');
+      toast(isRemote() ? 'OP MODE ON \u00b7 SERVER' : 'OP MODE ON');
     }));
-    panel.appendChild(toggleRow('god mode', function () { return isRemote() ? OPS.srv.god : OPS.god; }, function (v) { if (isRemote()) { OPS.srv.god = v; srvSend({ god: v }); } else OPS.god = v; }, 'cannot die, auto-revive'));
-    panel.appendChild(toggleRow('freeze bots', function () { return isRemote() ? OPS.srv.freeze : OPS.freeze; }, function (v) { if (isRemote()) { OPS.srv.freeze = v; srvSend({ freeze: v }); } else OPS.freeze = v; }, 'every bot stands still'));
-    panel.appendChild(toggleRow('auto play', function () { return isRemote() ? OPS.srv.auto : OPS.auto; }, function (v) { if (isRemote()) { OPS.srv.auto = v; srvSend({ auto: v }); } else OPS.auto = v; }, 'a bot plays for you'));
-    panel.appendChild(toggleRow('turbo', function () { return isRemote() ? OPS.srv.turbo : OPS.turbo; }, function (v) { if (isRemote()) { OPS.srv.turbo = v; srvSend({ turbo: v }); } else OPS.turbo = v; }, '+speed while you hold a direction'));
-    panel.appendChild(actionRow('INSTANT WIN', function () { if (isRemote()) srvSend(null, null, true); else OPS.forceWin = true; }));
+    panel.appendChild(toggleRow('god mode', function () { return isRemote() ? OPS.srv.god : OPS.god; }, setGod, 'cannot die, auto-revive'));
+    panel.appendChild(toggleRow('freeze bots', function () { return isRemote() ? OPS.srv.freeze : OPS.freeze; }, setFreeze, 'every bot stands still'));
+    panel.appendChild(toggleRow('auto play', function () { return isRemote() ? OPS.srv.auto : OPS.auto; }, setAuto, 'a bot plays for you'));
+    panel.appendChild(toggleRow('turbo', function () { return isRemote() ? OPS.srv.turbo : OPS.turbo; }, setTurbo, '+speed while you hold a direction'));
+    panel.appendChild(actionRow('INSTANT WIN', instantWin));
 
     if (ADMK) panel.appendChild(buildUsersBox());
 
@@ -1037,10 +1074,7 @@
       } else {
         for (var c = 0; c < list.length; c++) {
           (function (cheat) {
-            var row = toggleRow(cheat.label, function () { return isRemote() ? !!OPS.srv.act[cheat.id] : !!OPS.act[cheat.id]; }, function (v) {
-              if (isRemote()) { OPS.srv.act[cheat.id] = v; var a = {}; a[cheat.id] = v; srvSend(null, a); }
-              else OPS.act[cheat.id] = v;
-            }, cheat.d);
+            var row = toggleRow(cheat.label, function () { return isRemote() ? !!OPS.srv.act[cheat.id] : !!OPS.act[cheat.id]; }, function (v) { setAct(cheat.id, v); }, cheat.d);
             gameBox.appendChild(row);
           })(list[c]);
         }
@@ -1101,11 +1135,11 @@
       if (panel) panel.style.display = OPS.open ? 'block' : 'none';
       if (OPS.open) rebuildGameSection();
     },
-    god: function (v) { OPS.god = v === undefined ? !OPS.god : !!v; return OPS.god; },
-    freeze: function (v) { OPS.freeze = v === undefined ? !OPS.freeze : !!v; return OPS.freeze; },
-    turbo: function (v) { OPS.turbo = v === undefined ? !OPS.turbo : !!v; return OPS.turbo; },
-    auto: function (v) { OPS.auto = v === undefined ? !OPS.auto : !!v; return OPS.auto; },
-    win: function () { OPS.forceWin = true; },
+    god: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.god : OPS.god); return setGod(v); },
+    freeze: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.freeze : OPS.freeze); return setFreeze(v); },
+    turbo: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.turbo : OPS.turbo); return setTurbo(v); },
+    auto: function (v) { if (v === undefined) v = !(isRemote() ? OPS.srv.auto : OPS.auto); return setAuto(v); },
+    win: instantWin,
     aid: function (v) {
       if (!E.gameId || !AIDS[E.gameId]) return false;
       if (v === undefined) v = !OPS.aids[E.gameId];
@@ -1113,19 +1147,20 @@
       return OPS.aids[E.gameId];
     },
     set: function (id, v) {
-      OPS.act[id] = v === undefined ? !OPS.act[id] : !!v;
-      return OPS.act[id];
+      if (v === undefined) v = !(isRemote() ? !!OPS.srv.act[id] : !!OPS.act[id]);
+      return setAct(id, v);
     },
     info: function () {
-      return { game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, auto: OPS.auto, act: OPS.act, aids: OPS.aids };
+      return { game: E.gameId, mode: E.mode, god: OPS.god, freeze: OPS.freeze, turbo: OPS.turbo, auto: OPS.auto, act: OPS.act, aids: OPS.aids, srv: OPS.srv, adm: !!ADMK };
     },
     _h: hook
   };
 
+  bindSrvAcks();
+
   if (window.document && document.body) {
     buildPanel();
     buildLauncher();
-    bindSrvAcks();
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'F9') { ev.preventDefault(); VPX.panel(!OPS.open); }
       else if (ev.key === 'Escape' && OPS.open) VPX.panel(false);

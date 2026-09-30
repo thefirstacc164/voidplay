@@ -322,8 +322,21 @@ async function main() {
       a.room('start');
       const started3 = await a.waitEvent('started');
       ok(started3 && started3.game === 'bombTag', 'fresh game starts after god-mode sweep');
-      await new Promise((r) => setTimeout(r, 500));
     }
+    await new Promise((r) => setTimeout(r, 500));
+
+    // a JOINED player (not the host) insta-wins
+    b.social('ops', { k: KEY, win: 1 });
+    const endedJ = await a.waitEvent('ended', 10000);
+    ok(endedJ && endedJ.result && endedJ.result.w === 2, 'joined player can insta-win mid-game');
+    ok(Array.isArray(endedJ.result.rank) && endedJ.result.rank[0] === 2, 'joined winner ranked first');
+
+    a.room('pick', { g: 'bombTag' });
+    await new Promise((r) => setTimeout(r, 150));
+    a.room('start');
+    const started4 = await a.waitEvent('started');
+    ok(started4 && started4.game === 'bombTag', 'one more game for the host win');
+    await new Promise((r) => setTimeout(r, 500));
     a.social('ops', { k: KEY, win: 1 });
     const ended2 = await a.waitEvent('ended', 10000);
     ok(ended2 && ended2.result && ended2.result.w === 1, 'instant win works in an online room');
